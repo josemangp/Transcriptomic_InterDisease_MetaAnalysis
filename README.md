@@ -6,7 +6,7 @@ Integrative bulk RNA-seq analysis of purified monocytes across five systemic aut
 
 ## Introduction
 
-This repository contains the full analytical pipeline developed for the Master's Thesis "Core Transcriptomic Monocyte Dysregulation Links Systemic Autoimmunity to Chronic Graft-versus-Host Disease" (José Manuel García Pérez, Universidad de Sevilla / Universidad Internacional de Andalucía, 2026).
+This repository contains the full analytical pipeline developed for the Master's Thesis "Core Transcriptomic Monocyte Dysregulation Links Systemic Autoimmunity to Chronic Graft-versus-Host Disease" (José Manuel García Pérez, University of Sevilla / International University of Andalusia, 2026).
 
 Given the critical scarcity of monocyte-specific transcriptomic data in chronic Graft-versus-Host Disease (cGVHD), this project leverages the pathophysiological similarities between cGVHD and systemic autoimmune diseases to infer shared molecular programs. Ten public bulk RNA-seq datasets from purified monocytes across five autoimmune conditions are integrated through a two-tier approach — descriptive overlap analysis and formal precision-weighted meta-analysis — culminating in a 41-gene interferon-driven core signature. Transcriptomic findings are subsequently correlated with flow cytometry data from the BIOALO cGVHD cohort.
 
