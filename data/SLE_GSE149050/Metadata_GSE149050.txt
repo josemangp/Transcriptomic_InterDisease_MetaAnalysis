@@ -1,0 +1,89 @@
+Sample	Run	BioSample	GEO_Accession	Experiment	Bases	Bytes	Instrument	Layout	AvgSpotLen	Source	Condition	IFN_status	Visit_number	Age	Gender	Ethnicity	Race
+c1	SRR11582575	SAMN14655709	GSM4489407	SRX8150145	884.73 M	316.05 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	35	female	Non Hispanic	White
+c2	SRR11582576	SAMN14655708	GSM4489408	SRX8150146	916.38 M	329.82 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	35	female	Non Hispanic	White
+c3	SRR11582577	SAMN14655707	GSM4489409	SRX8150147	977.64 M	349.95 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	35	female	Non Hispanic	White
+c4	SRR11582578	SAMN14655706	GSM4489410	SRX8150148	908.81 M	324.98 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	37	female	Non Hispanic	White
+c5	SRR11582579	SAMN14655705	GSM4489411	SRX8150149	1.21 G	431.37 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	37	female	Non Hispanic	Asian
+c6	SRR11582580	SAMN14655704	GSM4489412	SRX8150150	904.58 M	324.07 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	39	female	Not available	not listed
+c7	SRR11582581	SAMN14655743	GSM4489413	SRX8150151	898.87 M	323.36 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	33	female	Not available	not listed
+c8	SRR11582582	SAMN14655742	GSM4489414	SRX8150152	989.73 M	356.16 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	54	female	Not available	not listed
+c9	SRR11582583	SAMN14655741	GSM4489415	SRX8150153	786.02 M	281.02 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	33	female	Not available	not listed
+c10	SRR11582584	SAMN14655740	GSM4489416	SRX8150154	938.65 M	336.69 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	41	female	Not available	not listed
+c11	SRR11582585	SAMN14655739	GSM4489417	SRX8150155	1.06 G	379.38 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	32	female	Not available	not listed
+c12	SRR11582586	SAMN14655738	GSM4489418	SRX8150156	1.04 G	368.07 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	31	female	Not available	not listed
+c13	SRR11582588	SAMN14655736	GSM4489420	SRX8150174	788.45 M	331.16 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	58	female	Non Hispanic	White
+c14	SRR11582589	SAMN14655735	GSM4489421	SRX8150175	1.09 G	386.40 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	50	female	Hispanic	White
+c15	SRR11582590	SAMN14655734	GSM4489422	SRX8150176	946.32 M	342.62 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	36	female	Hispanic	White
+c16	SRR11582591	SAMN14655683	GSM4489423	SRX8150177	831.62 M	297.71 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	38	female	not listed	not listed
+c17	SRR11582592	SAMN14655745	GSM4489424	SRX8150178	703.44 M	249.88 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	31	female	Non Hispanic	Black
+c18	SRR11582593	SAMN14655744	GSM4489425	SRX8150179	874.03 M	312.19 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	24	female	Hispanic	multiple
+c19	SRR11582594	SAMN14655786	GSM4489426	SRX8150180	728.36 M	259.17 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	45	female	Non Hispanic	Asian
+c20	SRR11582595	SAMN14655785	GSM4489427	SRX8150181	788.94 M	281.60 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	47	female	Non Hispanic	White
+c21	SRR11582596	SAMN14655784	GSM4489428	SRX8150182	798.47 M	283.23 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	26	female	Non Hispanic	White
+c22	SRR11582597	SAMN14655783	GSM4489429	SRX8150183	933.20 M	330.44 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	60	female	Non Hispanic	White
+c23	SRR11582599	SAMN14655781	GSM4489431	SRX8150185	893.95 M	316.64 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	32	female	Non Hispanic	White
+c24	SRR11582600	SAMN14655780	GSM4489432	SRX8150186	815.02 M	289.44 Mb	Illumina HiSeq 2500	single	50	cMo	hc	IFNneg	1	52	female	Non Hispanic	Black
+t1	SRR11582522	SAMN14655821	GSM4489354	SRX8150092	1.11 G	393.82 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	39	female	Hispanic/Latino	White
+t2	SRR11582523	SAMN14655820	GSM4489355	SRX8150093	1.00 G	358.38 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	19	female	Non-Hispanic/Latino	White
+t3	SRR11582524	SAMN14655819	GSM4489356	SRX8150094	1.28 G	455.88 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	44	female	Hispanic/Latino	White
+t4	SRR11582527	SAMN14655816	GSM4489359	SRX8150097	941.64 M	335.24 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	65	female	Non-Hispanic/Latino	White
+t5	SRR11582528	SAMN14655815	GSM4489360	SRX8150098	916.04 M	326.03 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	48	female	Non-Hispanic/Latino	White
+t6	SRR11582529	SAMN14655814	GSM4489361	SRX8150099	1.05 G	375.03 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	35	female	Hispanic/Latino	White
+t7	SRR11582530	SAMN14655813	GSM4489362	SRX8150100	1.31 G	459.94 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	30	female	Non-Hispanic/Latino	White
+t8	SRR11582531	SAMN14655812	GSM4489363	SRX8150101	647.49 M	232.69 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	46	female	Non-Hispanic/Latino	White
+t9	SRR11582532	SAMN14655811	GSM4489364	SRX8150102	953.28 M	340.50 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	50	female	Non-Hispanic/Latino	White
+t10	SRR11582533	SAMN14655810	GSM4489365	SRX8150103	868.97 M	312.87 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	44	female	Non-Hispanic/Latino	White
+t11	SRR11582535	SAMN14655732	GSM4489367	SRX8150105	1.11 G	397.89 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	63	female	Non-Hispanic/Latino	White
+t12	SRR11582540	SAMN14655727	GSM4489372	SRX8150110	904.83 M	351.65 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	40	female	Non-Hispanic/Latino	Black
+t13	SRR11582543	SAMN14655724	GSM4489375	SRX8150113	772.06 M	301.37 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	48	female	Non-Hispanic/Latino	White
+t14	SRR11582544	SAMN14655723	GSM4489376	SRX8150114	902.08 M	320.63 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	37	female	Hispanic/Latino	White
+t15	SRR11582545	SAMN14655722	GSM4489377	SRX8150115	908.90 M	324.71 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	33	female	Non-Hispanic/Latino	White
+t16	SRR11582546	SAMN14655721	GSM4489378	SRX8150116	936.16 M	335.47 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	53	female	Non-Hispanic/Latino	White
+t17	SRR11582547	SAMN14655766	GSM4489379	SRX8150117	974.34 M	355.76 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	45	female	Non-Hispanic/Latino	Asian
+t18	SRR11582548	SAMN14655765	GSM4489380	SRX8150118	876.49 M	311.72 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	32	female	Non-Hispanic/Latino	Other
+t19	SRR11582551	SAMN14655761	GSM4489383	SRX8150121	793.03 M	283.10 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	46	female	Non-Hispanic/Latino	White
+t20	SRR11582554	SAMN14655755	GSM4489386	SRX8150124	920.76 M	329.87 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	38	female	Hispanic/Latino	not listed
+t21	SRR11582555	SAMN14655754	GSM4489387	SRX8150125	992.71 M	365.63 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	36	female	Hispanic/Latino	White
+t22	SRR11582556	SAMN14655753	GSM4489388	SRX8150126	1.11 G	392.72 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	51	female	Hispanic/Latino	White
+t23	SRR11582557	SAMN14655752	GSM4489389	SRX8150127	904.15 M	324.30 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	54	female	Non-Hispanic/Latino	White
+t24	SRR11582559	SAMN14655750	GSM4489391	SRX8150129	873.08 M	313.19 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	25	female	Hispanic/Latino	White
+t25	SRR11582560	SAMN14655749	GSM4489392	SRX8150130	897.24 M	331.11 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	63	female	Non-Hispanic/Latino	White
+t26	SRR11582561	SAMN14655748	GSM4489393	SRX8150131	851.82 M	301.34 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	21	female	Non-Hispanic/Latino	White
+t27	SRR11582563	SAMN14655746	GSM4489395	SRX8150133	741.10 M	264.83 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	35	female	Non-Hispanic/Latino	White
+t28	SRR11582566	SAMN14655718	GSM4489398	SRX8150136	1.05 G	373.91 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	83	female	Non-Hispanic/Latino	White
+t29	SRR11582567	SAMN14655717	GSM4489399	SRX8150137	883.45 M	318.91 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	53	female	Non-Hispanic/Latino	Black
+t30	SRR11582568	SAMN14655716	GSM4489400	SRX8150138	903.72 M	323.83 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	53	female	Non-Hispanic/Latino	White
+t31	SRR11582569	SAMN14655715	GSM4489401	SRX8150139	933.77 M	338.21 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	39	female	Non-Hispanic/Latino	White
+t32	SRR11582571	SAMN14655713	GSM4489403	SRX8150141	1.05 G	375.48 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	69	female	Non-Hispanic/Latino	Pacific Islander
+t33	SRR11582572	SAMN14655712	GSM4489404	SRX8150142	1.11 G	394.85 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	56	female	Non-Hispanic/Latino	White
+t34	SRR11582573	SAMN14655711	GSM4489405	SRX8150143	799.01 M	283.88 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNneg	1	54	female	Non-Hispanic/Latino	White
+t35	SRR11582482	SAMN14655665	GSM4489314	SRX8150052	780.25 M	279.97 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	53	female	Hispanic/Latino	White
+t36	SRR11582486	SAMN14655701	GSM4489318	SRX8150056	841.30 M	299.97 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	19	female	Non-Hispanic/Latino	White
+t37	SRR11582489	SAMN14655698	GSM4489321	SRX8150059	813.72 M	286.85 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	19	female	Non-Hispanic/Latino	Asian
+t38	SRR11582490	SAMN14655697	GSM4489322	SRX8150060	912.20 M	323.41 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	27	male	Hispanic/Latino	White
+t39	SRR11582491	SAMN14655696	GSM4489323	SRX8150061	1.06 G	376.65 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	77	female	Hispanic/Latino	White
+t40	SRR11582493	SAMN14655694	GSM4489325	SRX8150063	1.13 G	399.96 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	41	female	Hispanic/Latino	White
+t41	SRR11582494	SAMN14655693	GSM4489326	SRX8150064	1.16 G	411.90 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	23	female	Non-Hispanic/Latino	White
+t42	SRR11582495	SAMN14655692	GSM4489327	SRX8150065	1.02 G	368.78 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	40	female	Non-Hispanic/Latino	Asian
+t43	SRR11582496	SAMN14655691	GSM4489328	SRX8150066	811.58 M	290.84 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	23	male	Non-Hispanic/Latino	Asian
+t44	SRR11582498	SAMN14655689	GSM4489330	SRX8150068	1.11 G	390.92 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	44	female	Hispanic/Latino	not listed
+t45	SRR11582499	SAMN14655688	GSM4489331	SRX8150069	848.09 M	303.56 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	50	female	Non-Hispanic/Latino	White
+t46	SRR11582500	SAMN14655687	GSM4489332	SRX8150070	895.82 M	318.31 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	40	female	Non-Hispanic/Latino	Asian
+t47	SRR11582501	SAMN14655686	GSM4489333	SRX8150071	897.10 M	319.11 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	41	female	Non-Hispanic/Latino	White
+t48	SRR11582502	SAMN14655685	GSM4489334	SRX8150072	768.01 M	293.06 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	20	female	Hispanic/Latino	White
+t49	SRR11582503	SAMN14655684	GSM4489335	SRX8150073	951.88 M	337.82 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	66	female	Non-Hispanic/Latino	White
+t50	SRR11582504	SAMN14655800	GSM4489336	SRX8150074	933.40 M	333.94 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	46	female	Non-Hispanic/Latino	White
+t51	SRR11582506	SAMN14655798	GSM4489338	SRX8150076	792.14 M	310.08 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	34	female	Pacific Islander	Asian
+t52	SRR11582507	SAMN14655797	GSM4489339	SRX8150077	931.95 M	331.18 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	39	female	Non-Hispanic/Latino	White
+t53	SRR11582508	SAMN14655796	GSM4489340	SRX8150078	844.45 M	300.64 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	35	female	Non-Hispanic/Latino	White
+t54	SRR11582509	SAMN14655795	GSM4489341	SRX8150079	820.86 M	297.33 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	34	female	Non-Hispanic/Latino	Asian
+t55	SRR11582510	SAMN14655794	GSM4489342	SRX8150080	962.65 M	342.02 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	39	female	Non-Hispanic/Latino	White
+t56	SRR11582511	SAMN14655793	GSM4489343	SRX8150081	894.53 M	315.83 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	23	female	Non-Hispanic/Latino	Asian
+t57	SRR11582512	SAMN14655792	GSM4489344	SRX8150082	591.68 M	258.06 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	33	female	Hispanic/Latino	White
+t58	SRR11582513	SAMN14655791	GSM4489345	SRX8150083	1.01 G	361.89 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	32	female	Non-Hispanic/Latino	White
+t59	SRR11582514	SAMN14655790	GSM4489346	SRX8150084	907.73 M	322.54 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	40	female	Non-Hispanic/Latino	Asian
+t60	SRR11582516	SAMN14655788	GSM4489348	SRX8150086	702.38 M	248.98 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	21	female	Hispanic/Latino	White
+t61	SRR11582517	SAMN14655787	GSM4489349	SRX8150087	826.08 M	293.64 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	63	female	Non-Hispanic/Latino	White
+t62	SRR11582518	SAMN14655825	GSM4489350	SRX8150088	735.40 M	277.10 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	44	female	Non-Hispanic/Latino	Black
+t63	SRR11582519	SAMN14655824	GSM4489351	SRX8150089	711.65 M	250.98 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	59	female	Hispanic/Latino	White
+t64	SRR11582520	SAMN14655823	GSM4489352	SRX8150090	909.92 M	323.04 Mb	Illumina HiSeq 2500	single	50	cMo	sle	IFNpos	1	31	female	Non-Hispanic/Latino	White

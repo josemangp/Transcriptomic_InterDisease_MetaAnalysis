@@ -1,0 +1,1118 @@
+---
+title: "Integrative Analysis"
+author: "José Manuel García Pérez"
+date: "2026-06-20"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+# Introduction
+
+In the previous notebooks, individual RNA-seq datasets spanning several autoimmune diseases were pre-processed, quantified and analyzed under a unified pipeline. The primary goal of this integrative notebook is to identify an Autoimmunity Core Signature, a set of genes consistently dysregulated across these distinct systemic conditions.
+
+To achieve this, a two-tier approach is implemented:
+
+1.  **Descriptive Overlap Analysis.** A qualitative approach checking the strict intersection of Differentially Expressed Genes (DEGs) across conditions to visualize shared features.
+
+2.  **Statistical Meta-Analysis.** A quantitative integration using Random Effects Models to combine fold changes and p-values, uncovering robust signals that might be missed by simple overlap thresholds.
+
+### Load Results
+
+From each individual analysis, the relevant metadata, DESeqDataSets, VST data and final results were saved using a unified format.
+
+```{r}
+# Systemic Lupus Erythematosus
+SLE_GSE149050 = readRDS("data/Outputs/GSE149050.rds")
+SLE_GSE249641 = readRDS("data/Outputs/GSE249641.rds")
+
+# Systemic Sclerosis / Scleroderma
+Scl_GSE303431 = readRDS("data/Outputs/GSE303431.rds")
+Scl_GSE124073 = list(Milan   = readRDS("data/Outputs/GSE124073_Milan.rds"),
+                     Utrecht = readRDS("data/Outputs/GSE124073_Utrecht.rds"))
+
+# Sjögren's Syndrome & Non-Sjögren's Sicca
+SS_GSE173670 = readRDS("data/Outputs/GSE173670.rds")
+
+# Rheumatoid Arthritis
+RA_GSE294225 = readRDS("data/Outputs/GSE294225.rds")
+
+# Juvenile Dermatomyositis
+JD_GSE221091 = readRDS("data/Outputs/GSE221091.rds")
+```
+
+# Descriptive Analysis: DEG Overlap
+
+### Extract all significant and sustantial DEGs
+
+Before performing complex statistical integrations, it is crucial to visually explore the results, looking for shared DEGs over different conditions. We maintain the same thresholds used: adjusted p-value \<0.05 and fold-change \>1.5x. Crucially, we must split the extraction into upregulated and downregulated genes to avoid false shared features.
+
+```{r}
+# Extract DEGs function
+extract_DEGs = function(res_df, direction, padj_th = 0.05, lfc_th = log2(1.5)) {
+  
+  # Remove NAs
+  res_clean = res_df[!is.na(res_df$padj), ]
+  
+  # Directional filtering
+  if (direction == "up") {
+    genes = rownames(res_clean[res_clean$padj < padj_th & 
+                               res_clean$log2FoldChange > lfc_th, ])
+  } else if (direction == "down") {
+    genes = rownames(res_clean[res_clean$padj < padj_th & 
+                               res_clean$log2FoldChange < -lfc_th, ])
+  }
+  return(genes)
+}
+
+## Upregulated
+upreg_list = list(
+  
+  # Systemic Lupus Erythematosus
+  SLE_IFNpos = extract_DEGs(SLE_GSE149050$res_SLE_IFNpos, "up"),
+  SLE_IFNneg = extract_DEGs(SLE_GSE149050$res_SLE_IFNneg, "up"),
+  
+  SLE = extract_DEGs(SLE_GSE249641$global$res, "up"),
+  SLE_Classical = extract_DEGs(SLE_GSE249641$classical$res, "up"),
+  SLE_Intermediate = extract_DEGs(SLE_GSE249641$intermediate$res, "up"),
+  SLE_NonClassical = extract_DEGs(SLE_GSE249641$non_classical$res, "up"),
+  
+  # Systemic Sclerosis / Scleroderma
+  Scl = extract_DEGs(Scl_GSE303431$global$res, "up"),
+  Scl_Limited = extract_DEGs(Scl_GSE303431$subtypes$res_limited, "up"),
+  Scl_Diffuse = extract_DEGs(Scl_GSE303431$subtypes$res_diffuse, "up"),
+  
+  NFScl = extract_DEGs(Scl_GSE124073$Milan$global$res, "up"),
+  NFScl_Early = extract_DEGs(Scl_GSE124073$Milan$subtypes$res_early, "up"),
+  NFScl_NonCutaneous = extract_DEGs(Scl_GSE124073$Milan$subtypes$res_noncut, "up"),
+  
+  DefScl = extract_DEGs(Scl_GSE124073$Utrecht$global$res, "up"),
+  DefScl_NonCutaneous = extract_DEGs(Scl_GSE124073$Utrecht$subtypes$res_noncut, "up"),
+  DefScl_Limited = extract_DEGs(Scl_GSE124073$Utrecht$subtypes$res_limited, "up"),
+  DefScl_Diffuse = extract_DEGs(Scl_GSE124073$Utrecht$subtypes$res_diffuse, "up"),
+  
+  # Sjögren's
+  Sjogren = extract_DEGs(SS_GSE173670$res_pSS, "up"),
+  
+  # Non-Sjögren's Sicca
+  SiccaNS = extract_DEGs(SS_GSE173670$res_nS, "up"),
+  
+  # Rheumatoid Arthritis
+  RheumArthritis = extract_DEGs(RA_GSE294225$res, "up"),
+  
+  # Juvenile Dermatomyositis
+  JuvDermatomyositis = extract_DEGs(JD_GSE221091$res, "up")
+)
+
+## Downregulated
+downreg_list = list(
+  
+  # Systemic Lupus Erythematosus
+  SLE_IFNpos = extract_DEGs(SLE_GSE149050$res_SLE_IFNpos, "down"),
+  SLE_IFNneg = extract_DEGs(SLE_GSE149050$res_SLE_IFNneg, "down"),
+  
+  SLE = extract_DEGs(SLE_GSE249641$global$res, "down"),
+  SLE_Classical = extract_DEGs(SLE_GSE249641$classical$res, "down"),
+  SLE_Intermediate = extract_DEGs(SLE_GSE249641$intermediate$res, "down"),
+  SLE_NonClassical = extract_DEGs(SLE_GSE249641$non_classical$res, "down"),
+  
+  # Systemic Sclerosis / Scleroderma
+  Scl = extract_DEGs(Scl_GSE303431$global$res, "down"),
+  Scl_Limited = extract_DEGs(Scl_GSE303431$subtypes$res_limited, "down"),
+  Scl_Diffuse = extract_DEGs(Scl_GSE303431$subtypes$res_diffuse, "down"),
+  
+  NFScl = extract_DEGs(Scl_GSE124073$Milan$global$res, "down"),
+  NFScl_Early = extract_DEGs(Scl_GSE124073$Milan$subtypes$res_early, "down"),
+  NFScl_NonCutaneous = extract_DEGs(Scl_GSE124073$Milan$subtypes$res_noncut, "down"),
+  
+  DefScl = extract_DEGs(Scl_GSE124073$Utrecht$global$res, "down"),
+  DefScl_NonCutaneous = extract_DEGs(Scl_GSE124073$Utrecht$subtypes$res_noncut, "down"),
+  DefScl_Limited = extract_DEGs(Scl_GSE124073$Utrecht$subtypes$res_limited, "down"),
+  DefScl_Diffuse = extract_DEGs(Scl_GSE124073$Utrecht$subtypes$res_diffuse, "down"),
+  
+  # Sjögren's
+  Sjogren = extract_DEGs(SS_GSE173670$res_pSS, "down"),
+  
+  # Non-Sjögren's Sicca
+  SiccaNS = extract_DEGs(SS_GSE173670$res_nS, "down"),
+  
+  # Rheumatoid Arthritis
+  RheumArthritis = extract_DEGs(RA_GSE294225$res, "down"),
+  
+  # Juvenile Dermatomyositis
+  JuvDermatomyositis = extract_DEGs(JD_GSE221091$res, "down")
+)
+```
+
+### Intra-disease Overlap
+
+Previous to looking across different diseases, we must understand the internal structure of each one when different cohorts exist (SLE and sclerosis). This allows us to understand global vs subtype-specific analysis differences (which subtype dominates or does not participate, how similar they are, how the global design increases noise or is actually representative...) or inter-study behavior (large or unexpected lack of overlap, inconsistent amounts of DEGs...).
+
+```{r}
+library(ggVennDiagram)
+library(ggplot2)
+
+##### UPREG DEGs
+
+# Analyze differences in the amount of DEGs
+lapply(upreg_list, length)
+
+### Systemic Lupus Erythematosus
+
+ggVennDiagram(list(SLE_IFNneg = upreg_list$SLE_IFNneg, 
+                   SLE_IFNpos = upreg_list$SLE_IFNpos
+)) # Lack of IFNneg DEGs
+
+ggVennDiagram(list(Global = upreg_list$SLE,
+                   Classical = upreg_list$SLE_Classical,
+                   Intermediate = upreg_list$SLE_Intermediate,
+                   NonClassical = upreg_list$SLE_NonClassical
+)) # 382 noisy DEGs but big overlap
+
+ggVennDiagram(list(SLE_IFN = unique(c(upreg_list$SLE_IFNneg, 
+                            upreg_list$SLE_IFNpos)),
+                   SLE_subtypes = unique(c(upreg_list$SLE_Classical,
+                            upreg_list$SLE_Intermediate,
+                            upreg_list$SLE_NonClassical))
+)) # Not as much overlap as expected
+
+### Systemic Sclerosis / Scleroderma
+
+ggVennDiagram(list(Global = upreg_list$Scl,
+                   Limited = upreg_list$Scl_Limited,
+                   Diffuse = upreg_list$Scl_Diffuse
+)) # Extreme lack of DEGs
+
+ggVennDiagram(list(Global = upreg_list$NFScl,
+                   Early = upreg_list$NFScl_Early,
+                   NonCut = upreg_list$NFScl_NonCutaneous
+)) # Non Cutaneous disease explains the DEGs
+
+ggVennDiagram(list(Global = upreg_list$DefScl,
+                   NonCut = upreg_list$DefScl_NonCutaneous,
+                   Limited = upreg_list$DefScl_Limited,
+                   Diffuse = upreg_list$DefScl_Diffuse
+)) # The subtypes explain the DEGs without clear overlap
+
+ggVennDiagram(list(Scl = unique(c(upreg_list$Scl,
+                            upreg_list$Scl_Limited,
+                            upreg_list$Scl_Diffuse)),
+                   NFScl = unique(c(upreg_list$NFScl,
+                            upreg_list$NFScl_Early,
+                            upreg_list$NFScl_NonCutaneous)),
+                   DefScl = unique(c(upreg_list$DefScl,
+                            upreg_list$DefScl_NonCutaneous,
+                            upreg_list$DefScl_Limited,
+                            upreg_list$DefScl_Diffuse))
+)) # Medium but interesting overlap according to biology
+
+
+
+##### DOWNREG DEGs
+
+# Analyze differences in the amount of DEGs
+lapply(downreg_list, length)
+
+### Systemic Lupus Erythematosus
+
+ggVennDiagram(list(SLE_IFNneg = downreg_list$SLE_IFNneg, 
+                   SLE_IFNpos = downreg_list$SLE_IFNpos
+)) # Lack of IFNneg DEGs
+
+ggVennDiagram(list(Global = downreg_list$SLE,
+                   Classical = downreg_list$SLE_Classical,
+                   Intermediate = downreg_list$SLE_Intermediate,
+                   NonClassical = downreg_list$SLE_NonClassical
+)) # Similar noisy genes and overlap
+
+ggVennDiagram(list(SLE_IFN = unique(c(downreg_list$SLE_IFNneg, 
+                            downreg_list$SLE_IFNpos)),
+                   SLE_subtypes = unique(c(downreg_list$SLE_Classical,
+                            downreg_list$SLE_Intermediate,
+                            downreg_list$SLE_NonClassical))
+)) # Not as much overlap as expected
+
+### Systemic Sclerosis / Scleroderma
+
+ggVennDiagram(list(Global = downreg_list$Scl,
+                   Limited = downreg_list$Scl_Limited,
+                   Diffuse = downreg_list$Scl_Diffuse
+)) # Extreme lack of DEGs
+
+ggVennDiagram(list(Global = downreg_list$NFScl,
+                   Early = downreg_list$NFScl_Early,
+                   NonCut = downreg_list$NFScl_NonCutaneous
+)) # Extreme lack of DEGs
+
+ggVennDiagram(list(Global = downreg_list$DefScl,
+                   NonCut = downreg_list$DefScl_NonCutaneous,
+                   Limited = downreg_list$DefScl_Limited,
+                   Diffuse = downreg_list$DefScl_Diffuse
+)) # NonCut has more DEGs but they are not captured by global design
+
+ggVennDiagram(list(Scl = unique(c(downreg_list$Scl,
+                            downreg_list$Scl_Limited,
+                            downreg_list$Scl_Diffuse)),
+                   NFScl = unique(c(downreg_list$NFScl,
+                            downreg_list$NFScl_Early,
+                            downreg_list$NFScl_NonCutaneous)),
+                   DefScl = unique(c(downreg_list$DefScl,
+                            downreg_list$DefScl_NonCutaneous,
+                            downreg_list$DefScl_Limited,
+                            downreg_list$DefScl_Diffuse))
+)) # No overlap
+```
+
+### Inter-disease Overlap
+
+Now, we reach the core question: What is shared across all 5 autoimmune diseases? We need to consolidate our lists first, creating a merged list so that each disease is represented by a single, comprehensive list of DEGs. For sclerosis, the unique union of the disease subtypes is considered. However, for the monocyte subtypes in SLE, only the intersection is included (not the global model as too much noise is added), as it is the most similar approach to the rest of the studies where this level of resolution was not achieved.
+
+While we can draw Venn diagrams for 5 sets, it becomes geometrically unreadable. UpSet plots use a matrix layout where:
+
+-   The dots and lines at the bottom show which specific sets are intersecting.
+-   The vertical bars show exactly how many genes are in that specific intersection.
+-   The horizontal bars show the total size of each disease's DEG list.
+
+```{r}
+library(UpSetR)
+
+### Merged lists
+merged_upreg_list = list(SLE = 
+                         unique(c(upreg_list$SLE_IFNneg, 
+                                  upreg_list$SLE_IFNpos,
+                                  Reduce(intersect, list(
+                                         upreg_list$SLE_Classical,
+                                         upreg_list$SLE_Intermediate,
+                                         upreg_list$SLE_NonClassical)))),
+                         Sclerosis =
+                         unique(c(upreg_list$Scl,
+                                  upreg_list$Scl_Limited,
+                                  upreg_list$Scl_Diffuse,
+                                  upreg_list$NFScl,
+                                  upreg_list$NFScl_Early,
+                                  upreg_list$NFScl_NonCutaneous,
+                                  upreg_list$DefScl,
+                                  upreg_list$DefScl_NonCutaneous,
+                                  upreg_list$DefScl_Limited,
+                                  upreg_list$DefScl_Diffuse)),
+                         Sjogren = 
+                         upreg_list$Sjogren,
+                         Arthritis = 
+                         upreg_list$RheumArthritis,
+                         Dermatomyositis = 
+                         upreg_list$JuvDermatomyositis
+)
+
+merged_downreg_list = list(SLE = 
+                         unique(c(downreg_list$SLE_IFNneg, 
+                                  downreg_list$SLE_IFNpos,
+                                  Reduce(intersect, list(
+                                         downreg_list$SLE_Classical,
+                                         downreg_list$SLE_Intermediate,
+                                         downreg_list$SLE_NonClassical)))),
+                         Sclerosis =
+                         unique(c(downreg_list$Scl,
+                                  downreg_list$Scl_Limited,
+                                  downreg_list$Scl_Diffuse,
+                                  downreg_list$NFScl,
+                                  downreg_list$NFScl_Early,
+                                  downreg_list$NFScl_NonCutaneous,
+                                  downreg_list$DefScl,
+                                  downreg_list$DefScl_NonCutaneous,
+                                  downreg_list$DefScl_Limited,
+                                  downreg_list$DefScl_Diffuse)),
+                         Sjogren = 
+                         downreg_list$Sjogren,
+                         Arthritis = 
+                         downreg_list$RheumArthritis,
+                         Dermatomyositis = 
+                         downreg_list$JuvDermatomyositis
+)
+
+#### Overlaps
+
+# Upregulated DEGs
+
+upset(fromList(merged_upreg_list), 
+      order.by = "freq",
+      nsets = 5,
+      main.bar.color = "steelblue", 
+      sets.bar.color = "tomato")
+
+# Downregulated DEGs
+
+upset(fromList(merged_downreg_list), 
+      order.by = "freq",
+      nsets = 5,
+      main.bar.color = "steelblue", 
+      sets.bar.color = "tomato")
+
+# Comparative summary
+
+lapply(merged_upreg_list, length)
+
+length(unique(c(merged_upreg_list$SLE,
+                merged_upreg_list$Sclerosis,
+                merged_upreg_list$Sjogren,
+                merged_upreg_list$Arthritis,
+                merged_upreg_list$Dermatomyositis)))
+
+length(c(merged_upreg_list$SLE,
+         merged_upreg_list$Sclerosis,
+         merged_upreg_list$Sjogren,
+         merged_upreg_list$Arthritis,
+         merged_upreg_list$Dermatomyositis))
+
+lapply(merged_downreg_list, length)
+
+length(unique(c(merged_downreg_list$SLE,
+                merged_downreg_list$Sclerosis,
+                merged_downreg_list$Sjogren,
+                merged_downreg_list$Arthritis,
+                merged_downreg_list$Dermatomyositis)))
+
+length(c(merged_downreg_list$SLE,
+         merged_downreg_list$Sclerosis,
+         merged_downreg_list$Sjogren,
+         merged_downreg_list$Arthritis,
+         merged_downreg_list$Dermatomyositis))
+```
+
+### Subtype Overlap
+
+While the global disease overlap tells us what is shared across different autoimmune conditions, it is interesting to address the internal heterogeneity of specific diseases at a cellular level. For instance, the GSE249641 dataset for SLE separates monocytes into three distinct functional subsets: Classical, Intermediate, and Non-Classical. By intersecting the DEGs of these specific subsets, we can determine whether the SLE transcriptomic signature is a pan-monocyte phenomenon or driven predominantly by a single differentiation state.
+
+For this section, the FC threshold is set at the standard 2x. The increased resolution of this approach leaded to an artificially enlarged DEG list, while a lower threshold was useful in the rest of the studies to retrieve more subtle regulatory patterns.
+
+```{r}
+# Subtypes lists
+subtype_upreg = list(Classical = upreg_list$SLE_Classical,
+  Intermediate = upreg_list$SLE_Intermediate,
+  NonClassical = upreg_list$SLE_NonClassical)
+  
+subtype_downreg = list(Classical = downreg_list$SLE_Classical,
+  Intermediate = downreg_list$SLE_Intermediate,
+  NonClassical = downreg_list$SLE_NonClassical)
+
+# Overlap
+
+ggVennDiagram(subtype_upreg, 
+              label_alpha = 0,
+              label_color = "black",
+              edge_lty = "solid",
+              edge_size = 0.8
+              ) + 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1
+                       ) + 
+  theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.key.width = unit(1.5, "cm"),
+       ) +
+  labs(title = "Upregulated DEGs by Monocyte Subtype",
+       fill = "DEGs")
+
+ggVennDiagram(subtype_downreg, 
+              label_alpha = 0,
+              label_color = "black",
+              edge_lty = "solid",
+              edge_size = 0.8
+              ) + 
+  scale_fill_distiller(palette = "Blues", direction = 1
+                       ) + 
+  theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.key.width = unit(1.5, "cm"),
+       ) +
+  labs(title = "Downregulated DEGs by Monocyte Subtype",
+       fill = "DEGs")
+
+###### CHANGE THRESHOLDS
+
+# Subtypes lists
+subtype_upreg = list(Classical = extract_DEGs(SLE_GSE249641$classical$res, "up", lfc_th = 1),
+  Intermediate = extract_DEGs(SLE_GSE249641$intermediate$res, "up", lfc_th = 1),
+  NonClassical = extract_DEGs(SLE_GSE249641$non_classical$res, "up", lfc_th = 1))
+  
+subtype_downreg = list(Classical = extract_DEGs(SLE_GSE249641$classical$res, "down", lfc_th = 1),
+  Intermediate = extract_DEGs(SLE_GSE249641$intermediate$res, "down", lfc_th = 1),
+  NonClassical = extract_DEGs(SLE_GSE249641$non_classical$res, "down", lfc_th = 1))
+
+# Overlap
+
+ggVennDiagram(subtype_upreg, 
+              label_alpha = 0,
+              label_color = "black",
+              edge_lty = "solid",
+              edge_size = 0.8
+              ) + 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1
+                       ) + 
+  theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.key.width = unit(1.5, "cm"),
+       ) +
+  labs(title = "Upregulated DEGs by Monocyte Subtype",
+       fill = "DEGs")
+
+ggVennDiagram(subtype_downreg, 
+              label_alpha = 0,
+              label_color = "black",
+              edge_lty = "solid",
+              edge_size = 0.8
+              ) + 
+  scale_fill_distiller(palette = "Blues", direction = 1
+                       ) + 
+  theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.key.width = unit(1.5, "cm"),
+       ) +
+  labs(title = "Downregulated DEGs by Monocyte Subtype",
+       fill = "DEGs")
+```
+
+### MetaScape Visualization
+
+Web tools like MetaScape are often superior for generating highly stylized, publication-ready functional enrichment visualizations. In this section, we mainly focus on "functional clustering" tools, based on shared DEGs and represented as heatmaps. MetaScape requires simple CSV file where each column is a gene list.
+
+```{r}
+# Fill NAs for equal sizes
+upreg_metascape = data.frame(lapply(merged_upreg_list, 
+                             function(x) {
+      length(x) = max_len = max(sapply(merged_upreg_list, length)) 
+      x[is.na(x)] = ""    
+      return(x)
+      }), 
+      check.names = FALSE)
+
+downreg_metascape = data.frame(lapply(merged_downreg_list, 
+                             function(x) {
+      length(x) = max_len = max(sapply(merged_downreg_list, length)) 
+      x[is.na(x)] = ""    
+      return(x)
+      }), 
+      check.names = FALSE)
+
+up_sub_metascape = data.frame(lapply(subtype_upreg, 
+                             function(x) {
+      length(x) = max_len = max(sapply(subtype_upreg, length)) 
+      x[is.na(x)] = ""    
+      return(x)
+      }), 
+      check.names = FALSE)
+
+down_sub_metascape = data.frame(lapply(subtype_downreg, 
+                             function(x) {
+      length(x) = max_len = max(sapply(subtype_downreg, length)) 
+      x[is.na(x)] = ""    
+      return(x)
+      }), 
+      check.names = FALSE)
+
+## Export the data frames
+write.csv(upreg_metascape, 
+          file = "data/Outputs/Metascape_Upreg_Input.csv", 
+          row.names = FALSE, 
+          quote = FALSE)
+
+write.csv(downreg_metascape, 
+          file = "data/Outputs/Metascape_Downreg_Input.csv", 
+          row.names = FALSE, 
+          quote = FALSE)
+
+write.csv(up_sub_metascape, 
+          file = "data/Outputs/Metascape_UpregSubtype_Input.csv", 
+          row.names = FALSE, 
+          quote = FALSE)
+
+write.csv(down_sub_metascape, 
+          file = "data/Outputs/Metascape_DownregSubtype_Input.csv", 
+          row.names = FALSE, 
+          quote = FALSE)
+```
+
+# Meta-Analysis (Late Integration)
+
+While simple overlaps are visually intuitive, they are statistically fragile. For example, if a crucial gene strongly passes the significance threshold in 4 diseases, but narrowly misses it in the 5th due to a smaller sample size, a strict Venn diagram will completely discard that gene from the "Core Signature".
+
+To overcome this, we perform a formal meta-analysis using MetaVolcanoR. The algorithm uses a Random Effects Model, which calculates a weighted average of the expression changes, giving more weight to highly precise cohorts and penalizing noisy ones.
+
+### Data Preparation
+
+MetaVolcanoR requires a highly specific format, including genes, logFC, p-values and 95% confidence intervals (lower and upper limits). Notably, DESeq2 provides the standard error of the log2FC (lfcSE) but the meta-analysis requires the confidence intervals, which can be calculated from it.
+
+```{r}
+library(MetaVolcanoR)
+
+# DESeq2 results were saved as df
+# Columns: baseMean, log2FC, lfcSE, pvalue and padj
+# Rownames: ENSEMBL annotation
+
+# Prepare results function
+prepare_res = function(res_df) {
+  
+  # Necessary columns with their standardized names for MetaVolcanoR
+  named_df = data.frame(
+    Gene    = rownames(res_df),
+    logFC   = res_df$log2FoldChange,
+    P.Value = res_df$pvalue,
+    CI.L    = res_df$log2FoldChange - (1.96 * res_df$lfcSE),
+    CI.R    = res_df$log2FoldChange + (1.96 * res_df$lfcSE)
+  )
+  
+  # Clean NAs to prevent error
+  clean_df = na.omit(named_df)
+  return(clean_df)
+}
+```
+
+### Intra-disease Pre-Meta-Analysis
+
+Before we can compare the diseases, we must collapse the multi-cohort diseases (SLE and Scleroderma) into single, unified profiles to avoid overrepresentation of these diseases. We run a "Pre-Meta-Analysis" to fuse the subtypes together, obtaining meta-statistics that will then be used as the original ones.
+
+Note: There is a known bug in R environments regarding S4 object validation when using MetaVolcanoR, due to inconsistencies between R, ggplot2 and MetaVolcanoR versions. We bypassed this by overriding the ValidObject namespace, but compilation cannot be fulfilled directly when this action is executed during the process (saved as RData and eval=F for compilation).
+
+```{r, eval=F}
+#### SLE
+ # For GSE149050, SLE_IFNneg is discarded due to lack of significant differences against hc
+ # For GSE249641, we integrate the subtypes as global design added noise
+list_SLE = list(
+  SLE_IFNpos = prepare_res(SLE_GSE149050$res_SLE_IFNpos),
+  SLE_Classical = prepare_res(SLE_GSE249641$classical$res),
+  SLE_Intermediate = prepare_res(SLE_GSE249641$intermediate$res),
+  SLE_Nonclassical = prepare_res(SLE_GSE249641$non_classical$res)
+)
+
+# Added to solve versions incompatibilities 
+library(methods)
+setValidity("MetaVolcano", function(object) TRUE)
+unlockBinding("validObject", as.environment("package:methods"))
+assignInNamespace("validObject",
+                  function(object, 
+                           test = FALSE, complete = FALSE) TRUE,
+                  ns = "methods")
+
+# Random Effects Meta-Analysis
+meta_rem_SLE = rem_mv(diffexp      = list_SLE,
+                      pcriteria    = "P.Value",
+                      foldchangecol= "logFC",
+                      genenamecol  = "Gene",
+                      collaps      = TRUE,
+                      llcol        = "CI.L",
+                      rlcol        = "CI.R",
+                      metathr      = 0.01,
+                      jobname      = "SLE_MetaVolcano",
+                      outputfolder = "data/Outputs/",
+                      draw         = "PDF")
+
+save(meta_rem_SLE,
+     file = "data/Outputs/SLE_MetaVolcano_res.RData")
+
+
+#### Scl
+ # GSE303431 is discarded, as no DEGs were found at all
+ # For GSE124073 we take the independent cohorts, discarding the early stage as it is indistinguishable from hc
+list_Scl = list(
+  NFScl_NonCutaneous = prepare_res(Scl_GSE124073$Milan$subtypes$res_noncut),
+  DefScl_NonCutaneous = prepare_res(Scl_GSE124073$Utrecht$subtypes$res_noncut),
+  DefScl_Limited = prepare_res(Scl_GSE124073$Utrecht$subtypes$res_limited),
+  DefScl_Diffuse = prepare_res(Scl_GSE124073$Utrecht$subtypes$res_diffuse)
+)
+
+# Added to solve versions incompatibilities 
+library(methods)
+setValidity("MetaVolcano", function(object) TRUE)
+unlockBinding("validObject", as.environment("package:methods"))
+assignInNamespace("validObject",
+                  function(object, 
+                           test = FALSE, complete = FALSE) TRUE,
+                  ns = "methods")
+
+meta_rem_Scl = rem_mv(diffexp      = list_Scl,
+                      pcriteria    = "P.Value",
+                      foldchangecol= "logFC",
+                      genenamecol  = "Gene",
+                      collaps      = TRUE,
+                      llcol        = "CI.L",
+                      rlcol        = "CI.R",
+                      metathr      = 0.01,
+                      jobname      = "Scl_MetaVolcano",
+                      outputfolder = "data/Outputs/",
+                      draw         = "PDF")
+
+save(meta_rem_Scl,
+     file = "data/Outputs/Scl_MetaVolcano_res.RData")
+```
+
+```{r}
+# Visualize results
+load("data/Outputs/SLE_MetaVolcano_res.RData")
+meta_rem_SLE@MetaVolcano
+
+load("data/Outputs/Scl_MetaVolcano_res.RData")
+meta_rem_Scl@MetaVolcano
+```
+
+### Meta-Analysis: Core integration
+
+With SLE and Scleroderma safely collapsed into singular, robust meta-profiles, we can now integrate all 5 distinct autoimmune diseases. First, we need to extract the newly generated consensus logFCs and p-values from our SLE and Scleroderma "pre-meta-analyses" so they match the format of the single-cohort diseases (Sjögren, Arthritis, Dermatomyositis).
+
+Finally, we run the ultimate combinatorial meta-analysis. This uses a combination approach (like Fisher's method) to derive a single, overarching metric for every gene across all 5 conditions.
+
+```{r}
+# Adapt format as single study for SLE and Scl
+# 'randomSummary' = Combined log2FC and 'randomP' = Combined p-value
+meta_SLE_def = meta_rem_SLE@metaresult
+
+meta_SLE_def = data.frame(
+  Gene    = meta_SLE_def$Gene,
+  logFC   = meta_SLE_def$randomSummary,
+  P.Value = meta_SLE_def$randomP,
+  CI.L    = meta_SLE_def$randomCi.lb,
+  CI.R    = meta_SLE_def$randomCi.ub
+)
+
+meta_Scl_def = meta_rem_Scl@metaresult
+
+meta_Scl_def = data.frame(
+  Gene    = meta_Scl_def$Gene,
+  logFC   = meta_Scl_def$randomSummary,
+  P.Value = meta_Scl_def$randomP,
+  CI.L    = meta_Scl_def$randomCi.lb,
+  CI.R    = meta_Scl_def$randomCi.ub
+)
+
+## Definitive list
+
+list_all = list(
+  SLE = meta_SLE_def,
+  Sclerosis = meta_Scl_def,
+  Sjogren = prepare_res(SS_GSE173670$res_pSS),
+  Arthritis = prepare_res(RA_GSE294225$res),
+  Dermatomyositis = prepare_res(JD_GSE221091$res)
+)
+```
+
+```{r, eval=F}
+# Added to solve versions incompatibilities 
+library(methods)
+setValidity("MetaVolcano", function(object) TRUE)
+unlockBinding("validObject", as.environment("package:methods"))
+assignInNamespace("validObject",
+                  function(object, 
+                           test = FALSE, complete = FALSE) TRUE,
+                  ns = "methods")
+
+# Combinatory!
+meta_global_ALL = combining_mv(diffexp       = list_all,
+                               pcriteria     = "P.Value",
+                               foldchangecol = "logFC",
+                               genenamecol   = "Gene",
+                               metafc        = "Mean",
+                               collaps       = TRUE,
+                               metathr       = 0.01,
+                               jobname       = "ALL_MetaVolcano",
+                               outputfolder  = "data/Outputs/",
+                               draw          = "PDF")
+
+save(meta_global_ALL,
+     file = "data/Outputs/ALL_MetaVolcano_res.RData")
+```
+
+```{r}
+load("data/Outputs/ALL_MetaVolcano_res.RData")
+meta_global_ALL@MetaVolcano
+
+### MANUAL METAVOLCANO
+
+library(tidyr)
+library(dplyr)
+
+# Classify
+mr_filtered = meta_global_ALL@metaresult |>
+  filter(!is.na(metafc) & !is.na(metap)) |>
+  mutate(
+    neg_log10_p = -log10(metap),
+    diff_state = case_when(
+      metafc > log2(1.5)  & metap < 0.01 ~ "Activated",
+      metafc < -log2(1.5)  & metap < 0.01 ~ "Repressed",
+      TRUE ~ "Not significant"
+    ),
+    diff_state = factor(diff_state, levels = c("Repressed", "Activated", "Not significant"))
+  )
+
+n_activated = sum(mr_filtered$diff_state == "Activated", na.rm = TRUE)
+n_repressed = sum(mr_filtered$diff_state == "Repressed", na.rm = TRUE)
+
+# Plotting
+ggplot(mr_filtered, aes(x = metafc, y = neg_log10_p, color = diff_state)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  scale_color_manual(values = c("Activated"       = "red",
+                                "Repressed"       = "blue",
+                                "Not significant" = "grey70")) +
+  geom_vline(xintercept = c(-log2(1.5), log2(1.5)),
+             linetype = "dashed", color = "black", alpha = 0.5) +
+  geom_hline(yintercept = -log10(0.01),
+             linetype = "dashed", color = "black", alpha = 0.5) +
+  labs(title    = "Meta-Volcano - Core Signature",
+       subtitle = paste("Repressed", n_repressed, "| Activated:", n_activated),
+       x        = "log2 Fold Change",
+       y        = "-log10 metap",
+       color    = "") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position  = "bottom",
+        panel.grid.minor = element_blank())
+```
+
+Mean combinatorial meta-volcano shows abundant noise. Using a weighted meta-analysis approach offers a significant statistical advantage because it intrinsically accounts for the reliability and precision of each individual study. While a simple mean approach treats every dataset equally, regardless of its sample size or internal variance, a weighted method applies inverse variance weighting, granting more influence to high-quality studies while penalizing noisy ones. This critical adjustment prevents a single low-powered experiment or extreme outlier from disproportionately skewing the consensus results. Ultimately, prioritizing study precision yields a much more robust and statistically powerful summary estimate, substantially reducing false positives and improving the reliability of the molecular signatures across heterogeneous datasets.
+
+```{r, eval=F}
+# Precision-weighted metafc, based on inverse variance
+# SE is recovered from the 95% CI
+# Weight = 1 /SE^2
+# Weighted FC = sum(weight * FC) / sum(weight) per gene across diseases
+
+# Get intermediate values
+mr = meta_global_ALL@metaresult
+
+diseases = c("SLE", "Sclerosis", "Sjogren", "Arthritis", "Dermatomyositis")
+
+compute_weighted_fc = function(gene, list_all, diseases) {
+  fcs = sapply(diseases, function(d) {
+    row = list_all[[d]][list_all[[d]]$Gene == gene, ]
+    if (nrow(row) == 0) return(NA_real_)
+    row$logFC[1]
+  })
+  ses = sapply(diseases, function(d) {
+    row = list_all[[d]][list_all[[d]]$Gene == gene, ]
+    if (nrow(row) == 0) return(NA_real_)
+    ((row$CI.R[1] - row$CI.L[1]) / (2 * 1.96))
+  })
+  w = 1 / ses^2
+  w[!is.finite(w)] = NA
+  if (all(is.na(w))) return(NA_real_)
+  sum(w * fcs, na.rm = TRUE) / sum(w, na.rm = TRUE)
+}
+
+# Compute final weighted FC
+weighted_fc_vec = sapply(mr$Gene, compute_weighted_fc, 
+                         list_all = list_all, 
+                         diseases = diseases)
+
+# Avoid corrupt data. Minimum of 3 diseases covered
+coverage = sapply(mr$Gene, function(gene) {
+  sum(sapply(diseases, function(d) {
+    row = list_all[[d]][list_all[[d]]$Gene == gene, ]
+    nrow(row) > 0 && is.finite(row$CI.R[1]) && is.finite(row$CI.L[1])
+  }))
+})
+
+weighted_fc_vec[coverage < 3] = NA
+
+
+# Replace naive mean with weighted estimate
+meta_global_ALLweighted = meta_global_ALL
+meta_global_ALLweighted@metaresult$metafc = weighted_fc_vec
+meta_global_ALLweighted@metaresult$coverage = coverage
+
+# Save results
+save(meta_global_ALLweighted,
+     file = "data/Outputs/ALLweighted_MetaVolcano_res.RData")
+```
+
+### Extract results - Metascape visualization
+
+We extract the final dataframe, which contains a metap (the combined global p-value) and a metafc (the combined fold change). We apply our strict significance filters here one last time, resulting in our definitive Autoimmunity Core Signature.
+
+Finally, we translate the Ensembl IDs to standard HUGO Gene Symbols so the list can be exported as a CSV and immediately interpreted by scientists or fed into functional pathway tools. Especially, we will focus on Metascape functional analysis.
+
+```{r}
+load("data/Outputs/ALLweighted_MetaVolcano_res.RData")  
+
+# See final dataframe 
+final_res = meta_global_ALLweighted@metaresult 
+head(final_res)  
+
+# Integrated p-value and mean LogFC, removing low covered
+filtered_res = subset(final_res, 
+                      metap < 0.01 & 
+                      metafc > log2(1.5) &
+                      !is.na(metafc))
+
+# Add gene symbols translation 
+library(org.Hs.eg.db)  
+filtered_res$Symbol = mapIds(x = org.Hs.eg.db,   
+                             keys = filtered_res$Gene,   
+                             column = "SYMBOL",   
+                             keytype = "ENSEMBL",   
+                             multiVals = "first" )  
+
+# Clean NAs 
+export_res = filtered_res[!is.na(filtered_res$Symbol), ]  
+dim(export_res)
+
+# Export to csv for MetaScape 
+write.csv(export_res, file = "data/Outputs/AutoimmunityCore_DEGs.csv", row.names = FALSE)
+```
+
+### Additional results
+
+To validate the precision-weighting strategy, some additional graphs can be interesting:
+
+-   Average weight per disease. The CI size and the weight given are inversely proportional. We can check the per-disease "strength".
+
+-   Naive mean vs weighted FC. This plot gives us a visual explanation on why weighting the FC is necessary.
+
+-   Behavior for top-10 metaDEGs.
+
+-   Meta-volcano plot for the new approach.
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+# Consistent colors
+diseases = c("SLE", "Sclerosis", "Sjogren", "Arthritis", "Dermatomyositis")
+
+disease_colors = c(
+  "SLE"              = "chartreuse4",
+  "Sclerosis"        = "darkorchid3",
+  "Sjogren"          = "darkorange1",
+  "Arthritis"        = "firebrick2",  
+  "Dermatomyositis"  = "deepskyblue2",
+  "Weighted\nSummary"= "black"
+)
+
+
+##### AVERAGE WEIGHT PER DISEASE
+
+# Calculate intermediate values
+mean_w_df = lapply(diseases, function(d) {
+                df  = list_all[[d]]
+                se  = (df$CI.R - df$CI.L) / (2 * 1.96)
+                w   = 1 / se^2
+                w[!is.finite(w)] = NA
+                data.frame(Disease = d, MeanWeight = mean(w, na.rm = TRUE))
+              }) |> bind_rows()
+
+# Plotting
+ggplot(mean_w_df, 
+       aes(x = reorder(Disease, MeanWeight), 
+           y = MeanWeight, 
+           fill = Disease)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = round(MeanWeight, 2)), 
+            hjust = -0.15, 
+            size = 3.8) +
+  coord_flip() +
+  scale_fill_manual(values = disease_colors) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title    = "Average Inverse-Variance Weight by Disease",
+       x = NULL, 
+       y = "Mean weight (1 / SE²)") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank())
+
+
+##### NAIVE MEAN VS WEIGTHED FC SCATTER
+mr = meta_global_ALLweighted@metaresult
+
+# Calculate mean by gene
+all_df = bind_rows(list_all[diseases], .id = "Disease")
+
+naive_df = all_df |>
+  group_by(Gene) |>
+  summarize(naive = mean(logFC, na.rm = TRUE), .groups = "drop")
+
+# Mean vs meta-analysis results
+comparison_df = naive_df |>
+  inner_join(mr[, c("Gene", "metafc")], by = "Gene") |>
+  rename(weighted = "metafc") |>
+  filter(is.finite(naive) & is.finite(weighted))
+
+# R-squared 
+r2 = round(cor(comparison_df$naive, 
+               comparison_df$weighted, 
+               use = "complete.obs")^2, 3)
+
+# Plotting
+ggplot(comparison_df, 
+       aes(x = naive, 
+           y = weighted,
+           color = weighted > log2(1.5))) +
+  geom_point(alpha = 0.75, size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, color = "firebrick", linewidth = 0.6, alpha = 0.6) +
+  geom_hline(yintercept = log2(1.5),
+             linetype = "dashed", color = "grey20", linewidth = 0.6, alpha = 0.8) +
+  geom_vline(xintercept = log2(1.5),
+             linetype = "dashed", color = "grey20", linewidth = 0.6, alpha = 0.8) +
+  annotate("text", x = -Inf, y = Inf, hjust = -4.5, vjust = 5.5,
+           label = paste0("R² = ", r2), size = 4.5, col = "firebrick") +
+  scale_color_manual(values = c("TRUE" = "coral", "FALSE" = "grey60")) +
+  labs(title = "Naive Mean vs Precision-Weighted logFC",
+       x = "Naive mean logFC", 
+       y = "Weighted logFC") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+
+
+##### FOREST PLOT
+
+# Top-10 genes (by idx)
+top_genes = export_res |>
+  arrange(desc(idx)) |>
+  head(10) |>
+  select(Gene, Symbol, metafc, metap, idx)
+
+# Per-disease information
+forest_df = all_df |>
+  filter(Gene %in% top_genes$Gene) |>
+  select(Disease, Gene, logFC, CI.L, CI.R) |>
+  left_join(top_genes[, c("Gene", "Symbol", "metafc")], by = "Gene") |>
+  mutate(Disease = factor(Disease, levels = diseases))
+
+# Meta-summary information
+summary_df = top_genes |>
+  mutate(Disease = "Weighted\nSummary",
+         logFC   = metafc,
+         CI.L    = NA_real_,
+         CI.R    = NA_real_) |>
+  select(Gene, Symbol, logFC, CI.L, CI.R, Disease, metafc) 
+
+# Join and plotting
+forest_full = bind_rows(forest_df, summary_df) |>
+  mutate(
+    Disease = factor(Disease, levels = c(diseases, "Weighted\nSummary")),
+    IsSum   = Disease == "Weighted\nSummary",
+    Symbol  = factor(Symbol, levels = rev(top_genes$Symbol)),
+    Panel   = factor(ifelse(IsSum, "Weighted Summary", "Per-disease logFC"),
+                     levels = c("Per-disease logFC", "Weighted Summary"))
+  )
+
+dummy_limits = data.frame(
+  Panel = rep(levels(forest_full$Panel), each = 2),
+  logFC = c(-1, 9, 0, 3.5),
+  Symbol = forest_full$Symbol[1]
+)
+
+ggplot(forest_full,
+       aes(x = logFC, 
+           y = Symbol, 
+           color = Disease,
+           shape = IsSum,
+           size  = IsSum)) +
+  
+  # Size and grey threshold
+  geom_blank(data = dummy_limits, 
+             aes(x = logFC, y = Symbol), inherit.aes = FALSE) +
+  scale_x_continuous(breaks = seq(-1, 9, by = 1), expand = c(0, 0)) + 
+  facet_grid(. ~ Panel, scales = "free_x", space = "free_x") +
+  annotate("rect", 
+           xmin = -Inf, xmax = log2(1.5), 
+           ymin = -Inf, ymax = Inf, 
+           fill = "grey80", alpha = 0.4) +
+  geom_vline(xintercept = log2(1.5), 
+             linetype = "solid", color = "grey60", linewidth = 0.4) +
+
+  # Values
+  geom_errorbarh(
+    aes(xmin = CI.L, xmax = CI.R),
+    height = 0.2, linewidth = 0.6,
+    data = filter(forest_full, !IsSum)
+  ) +
+  geom_point() +
+  scale_shape_manual(values = c("FALSE" = 16, "TRUE"  = 18)) +
+  scale_size_manual(values = c("FALSE" = 1.8,"TRUE"  = 4.2)) +
+  scale_color_manual(values = disease_colors) +
+
+  # Format
+  labs(
+    title = "Top-10 Core Signature Genes (metap x metaFC)",
+    x = "log2 Fold Change", 
+    y = NULL,
+    color = "Disease"
+  ) +
+  guides(
+    shape = "none", 
+    size  = "none", 
+    color = guide_legend(nrow = 1)
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position   = "bottom",
+    legend.title      = element_text(face = "bold", size = 11),
+    legend.text       = element_text(size = 9),
+    strip.text        = element_text(face = "bold", size = 12.5),
+    panel.grid.minor  = element_blank(),
+    panel.grid.major.y= element_line(linetype = "dotted", color = "grey88"),
+    panel.border      = element_rect(color = "black", fill = NA, linewidth = 0.7),
+    axis.title.x      = element_text(size = 12),
+    panel.spacing     = unit(1, "cm")
+  )
+
+##### MANUAL METAVOLCANO BY IDX
+
+# Classify 
+mr_filtered = meta_global_ALLweighted@metaresult |>
+  filter(!is.na(metafc) & !is.na(metap)) |>
+  mutate(
+    neg_log10_p = -log10(metap),
+    diff_state = case_when(
+      metafc > log2(1.5)  & metap < 0.01 ~ "Activated",
+      TRUE ~ "Not significant"
+    ),
+    diff_state = factor(diff_state, levels = c("Activated", "Not significant"))
+  )
+
+n_activated = sum(mr_filtered$diff_state == "Activated", na.rm = TRUE)
+
+# Get labels por top-10 by idx
+mr_filtered = mr_filtered |>
+  mutate(
+    ensembl_label = ifelse(Gene %in% top_genes$Gene, Gene, NA),
+    label = mapIds(org.Hs.eg.db,
+                   keys = ensembl_label,
+                   column = "SYMBOL",
+                   keytype = "ENSEMBL",
+                   multiVals = "first")
+  )
+
+# Plotting
+ggplot(mr_filtered, aes(x = metafc, y = neg_log10_p, color = diff_state)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  scale_color_manual(values = c("Activated"       = "red",
+                                "Not significant" = "grey70")) +
+  geom_vline(xintercept = c(-log2(1.5), log2(1.5)), 
+             linetype = "dashed", color = "black", alpha = 0.5) +
+  geom_hline(yintercept = -log10(0.01), 
+             linetype = "dashed", color = "black", alpha = 0.5) +
+  ggrepel::geom_label_repel(aes(label = label),
+                            size = 3.5, max.overlaps = 30,
+                            na.rm = TRUE, color = "black",
+                            fill = alpha("white", 0.7)) +
+  labs(title    = "Weighted Meta-Volcano - Core Signature",
+       subtitle = paste("Activated:", n_activated),
+       x        = "Weighted log2 Fold Change", 
+       y        = "-log10 metap",
+       color    = "") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position  = "bottom",
+        panel.grid.minor = element_blank())
+```
+
+#### Session Info
+
+```{r}
+sessionInfo()
+```

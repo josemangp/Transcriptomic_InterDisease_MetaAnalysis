@@ -1,0 +1,680 @@
+---
+title: "Bash_Quantification"
+author: "José Manuel García Pérez"
+date: "2026-06-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# RNA-seq Quantification using Salmon
+
+## Introduction
+
+In these notebooks, multiple RNA-seq datasets from public repositories (GEO) focusing on purified human monocytes are analyzed. Our goal is to identify common molecular signatures across several autoimmune diseases to better understand the mechanisms underlying chronic Graft-versus-Host Disease (cGVHD). Although cGVHD is triggered by donor cells, its clinical manifestations and pathogenic mechanisms overlap significantly with systemic autoimmune diseases.
+
+To ensure further comparability across the different datasets, all samples were processed and quantified under a unified pipeline that is fully explained in this first notebook.
+
+We would like to acknowledge the Scientific Computation Centre of Andalusia (CICA) for providing access to the Hercules Supercomputer, where these steps were performed.
+
+## Why using Salmon?
+
+STAR, Salmon and Kallisto are currently the main tools for RNA-seq quantification. However, Salmon stands out as the optimal choice for this project for several reasons:
+
+-   For an extensive analysis like this (approximately 300 samples are quantified), it occupies the sweet spot between the brute-force accuracy of STAR and the raw speed of Kallisto.
+
+-   Salmon's selective alignment mode with decoy sequences gives the best available balance between speed and mapping fidelity, avoiding spurious mappings (common in transcriptome-only alignment).
+
+-   Salmon can perform GC bias and sequence composition bias corrections, which can be especially important when integrating several GEO studies coming from different platforms or at different depths.
+
+-   Additionally, Salmon is the mainly recommended pre-processing tool by the DESeq2 team, including native integration with this framework for downstream analysis, reducing the risk of artifacts due to intermediate format conversions.
+
+| Feature | STAR | Salmon | Kallisto |
+|:---|:---|:---|:---|
+| **Category** | Splice-aware aligner | Quasi-mapping quantifier | Pseudo-alignment quantifier |
+| **Algorithm** | Suffix array (MMP) | RapMap + decoy-aware mapping | De Bruijn graph (k-mers) |
+| **Reference needed** | Genome (FASTA + GTF) | Transcriptome + genome as decoy | Transcriptome (FASTA) |
+| **Speed** | Slow | Fast | Ultra-fast |
+| **RAM usage** | \~30 GB (human) | 2–8 GB | \~4 GB |
+| **Primary output** | SAM/BAM (genomic coords) | Transcript abundance (TPM, counts) | Transcript abundance (TPM, counts) |
+| **Bias correction** | None (needs extra tools) | GC, length, sequence bias | Limited |
+| **Mapping fidelity** | Highest | High (with decoy) | Moderate |
+| **DESeq2 integration** | Indirect (via featureCounts) | Native (tximeta / tximport) | Indirect (via tximport) |
+| **Multi-study consistency** | Moderate | High | Moderate |
+| **Main use case** | Novel gene discovery, splicing, variants | Precise quantification of known transcripts | Bulk quantification, single-cell (kb-bustools) |
+| **HPC cost** | High (time + memory) | Low | Very low |
+
+# Step-by-Step Protocol
+
+[Note:]{.underline} all the scripts are designed to be executed from the scripts directory, including the GSExxxxxx accession as the only input variable.
+
+## Directory Structure
+
+Working on a Bash environment, the file organization structure is stated below. Each file's functions will be explained in the corresponding part of the protocol.
+
+-   TFM/
+
+    -   genome/
+
+        -   transcriptome.fa.gz
+
+        -   genome.fa.gz
+
+        -   annotation.gtf.gz
+
+        -   decoys.txt
+
+        -   gentrome.fa.gz
+
+        -   index/
+
+    -   scripts/
+
+        -   salmon_index.sh
+
+        -   read_download.sh + submit_download.sh
+
+        -   trim_fastp.sh + submit_trim.sh
+
+        -   qc_on_trim.sh + submit_qc_on_trim.sh
+
+        -   read_quant_salmon_trimmed.sh + submit_quant_trim.sh
+
+        -   multiqc_trimmed.sh
+
+    -   GSExxxxxx/
+
+        -   samples.txt
+
+        -   samples/
+
+            -   c1
+
+            -   ...
+
+            -   t1
+
+            -   ...
+
+        -   results/
+
+            -   qc_reports/
+
+            -   trim_reports/
+
+            -   quant/
+
+            -   multiqc/
+
+## Downloading Genomic Reference Files
+
+For Salmon's decoy-aware mode, three files are required: the transcriptome (cDNA sequences in FASTA), the full genome sequence (FASTA), and the gene annotation file (GTF). All three are downloaded from Ensembl, using the latest release as of April 2026.
+
+``` bash
+# Inside genome directory, for each file:
+wget -O name.extension link
+
+# TRANSCRIPTOME
+  # https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz
+
+# GENOME
+  # https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.toplevel.fa.gz
+
+# ANNOTATION
+  # https://ftp.ensembl.org/pub/release-115/gtf/homo_sapiens/Homo_sapiens.GRCh38.115.chr.gtf.gz
+```
+
+## Indexing (Salmon)
+
+Prior to quantification, Salmon requires an index of the reference sequences. This index is constructed from a gentrome file (concatenation of the transcriptome, first, and the full genome) alongside a decoy list derived from the genome sequence headers. The decoy mechanism allows Salmon to identify reads that map to genomic regions outside the transcriptome and discard them, substantially reducing the rate of spurious mappings and improving quantification accuracy. Index construction is computationally intensive but it only needs to be run once.
+
+[**salmon_index.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+#SBATCH --job-name=salmon_index
+#SBATCH --partition=standard
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+#SBATCH --output=index_salmon_%j.out
+#SBATCH --error=index_salmon_%j.err
+
+# Relative routes
+GENOME="../genome/genome.fa.gz"
+TRANSCRIPTOME="../genome/transcriptome.fa.gz"
+DECOYS="../genome/decoys.txt"
+GENTROME="../genome/gentrome.fa.gz"
+SALMON="../programs/salmon-latest_linux_x86_64/bin/salmon"
+INDEX_OUT="../genome/index"
+
+# Generate decoy list
+grep "^>" <(gunzip -c $GENOME) | cut -d " " -f 1 > $DECOYS
+sed -i.bak -e 's/>//g' $DECOYS
+
+# Gentrome generation (transcriptome must be first)
+cat $TRANSCRIPTOME $GENOME > $GENTROME
+
+# Salmon indexing
+$SALMON index \
+    -t $GENTROME \
+    -d $DECOYS \
+    -i $INDEX_OUT \
+    -p $SLURM_CPUS_PER_TASK
+```
+
+## Samples Map
+
+For each GEO study, a samples.txt is generated including the condition (example: c1, c2, ..., t1, t2, ...) and the SRA accession as columns. This file is used as a map, allowing easy iterations to submit independent SLURM jobs for parallel processing of the samples. For each step, we will only need to submit the "submit_xxxx.sh" script followed by the GSExxxxxx accession of the corresponding study.
+
+## Downloading Raw Sequencing Data (fasterq-dump)
+
+The raw sequencing reads for each sample are retrieved from the NCBI Sequence Read Archive (SRA). Downloads are performed using fasterq-dump, which automatically handles both single-end and paired-end layouts. Downloaded reads are immediately compressed to minimise storage usage on the cluster.
+
+[**submit_download.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+
+# GSE and samples map
+GSE=$1
+MAP_FILE="../$GSE/samples.txt"
+
+# Check map availability
+if [ ! -f "$MAP_FILE" ]
+then
+    echo "Error: $MAP_FILE not found"
+    exit 1
+fi
+
+# Submit job for each sample
+while read SAMPLE SRR
+do
+    # Follow progress
+    echo "$SAMPLE sent to SLURM"
+
+    # Create a directory
+    mkdir -p "../$GSE/samples/$SAMPLE"
+
+    # Submit job (example: GSE279728 c1 SRR31029281)
+    sbatch read_download.sh $GSE $SAMPLE $SRR
+
+    # 1 second sleep to avoid SLURM saturation
+    sleep 1
+done < "$MAP_FILE"
+
+# End message
+echo "----------------------"
+echo "All jobs sent to SLURM"
+```
+
+[**read_download.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+#SBATCH --job-name=sra_dl            
+#SBATCH --partition=standard         
+#SBATCH --nodes=1                    
+#SBATCH --ntasks=1                   
+#SBATCH --cpus-per-task=4            
+#SBATCH --mem=8G                     
+#SBATCH --time=03:00:00              
+#SBATCH --output=dl_%j.out           
+#SBATCH --error=dl_%j.err            
+
+# Inputs
+GSE=$1       # Example: GSE279728
+SAMPLE=$2    # Example: c1
+SRR=$3       # Example: SRR31029281
+
+# Relative routes
+FASTERQ="../programs/sratoolkit.3.4.1-ubuntu64/bin/fasterq-dump"
+DEST_DIR="../$GSE/samples/$SAMPLE"
+
+# Run fasterq-dump
+$FASTERQ "$SRR" \
+    --outdir "$DEST_DIR" \
+    --threads "$SLURM_CPUS_PER_TASK" \
+    --progress
+
+# Immediately compress (automatically detects single/paired)
+gzip "$DEST_DIR/${SRR}"*.fastq
+```
+
+IMPORTANT: for patients with pseudoreplication (several SRR for the same person), we concatenate the reads just after downloading them. In this case, this only happens for GSE221091. We could also perform this step later in R, but this first approach avoids any kind of bias.
+
+``` bash
+## Manually:
+
+# Single-End
+cat SRR1.fastq.gz SRR2.fastq.gz > SRR1toSRR2.fastq.gz
+
+# Paired-End
+cat SRR1_1.fastq.gz SRR2_1.fastq.gz > SRR1toSRR2_1.fastq.gz
+cat SRR1_2.fastq.gz SRR2_2.fastq.gz > SRR1toSRR2_2.fastq.gz
+```
+
+Once these concatenations are made, the samples.txt map must be adapted to the new format.
+
+## Trimming (fastp)
+
+Since this project integrates multiple studies with varying sequencing qualities, read trimming is applied uniformly across all datasets to ensure reproducibility. We use fastp for this step, specifically employing the `--trim_poly_g` flag, which is fundamental for correcting the two-color signal artifacts commonly found in NovaSeq and NextSeq platforms. Additionally, the `--cut_tail` option is used to automatically trim the ends of reads if the base quality drops sharply.
+
+[**submit_trim.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+
+# GSE and samples map
+GSE=$1
+MAP_FILE="../$GSE/samples.txt"
+
+# Check map availability
+if [ ! -f "$MAP_FILE" ]
+then
+    echo "Error: $MAP_FILE not found"
+    exit 1
+fi
+
+# Submit job for each sample
+while read SAMPLE SRR
+do
+    # Follow progress
+    echo "$SAMPLE sent to SLURM"
+
+    # Submit job (example: GSE279728 c1 SRR31029281)
+    sbatch trim_fastp.sh $GSE $SAMPLE $SRR
+
+    # 1 second sleep to avoid SLURM saturation
+    sleep 1
+done < "$MAP_FILE"
+
+# End message
+echo "----------------------"
+echo "All jobs sent to SLURM"
+```
+
+[**trim_fastp.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+#SBATCH --job-name=fastp_trim
+#SBATCH --partition=standard         
+#SBATCH --nodes=1                    
+#SBATCH --ntasks=1                   
+#SBATCH --cpus-per-task=8            
+#SBATCH --mem=16G                    
+#SBATCH --time=01:00:00              
+#SBATCH --output=trim_%j.out         
+#SBATCH --error=trim_%j.err          
+
+# Inputs
+GSE=$1       # Example: GSE279728
+SAMPLE=$2    # Example: c1
+SRR=$3       # Example: SRR31029281
+
+# Relative routes
+IN_DIR="../$GSE/samples/$SAMPLE"
+OUT_DIR="../$GSE/samples/$SAMPLE"
+REPORT_DIR="../$GSE/results/trim_reports"
+
+# Detect Layout
+if [ -f "$IN_DIR/${SRR}_1.fastq.gz" ] && [ -f "$IN_DIR/${SRR}_2.fastq.gz" ]
+then
+    LAYOUT="PE"
+elif [ -f "$IN_DIR/${SRR}.fastq.gz" ]
+then
+    LAYOUT="SE"
+else
+    exit 1
+fi
+
+# Create trim_reports directory
+mkdir -p "$REPORT_DIR"
+
+# Load and run fastp
+module load fastp/0.23.4-GCC-12.3.0
+
+if [ "$LAYOUT" = "PE" ]
+then
+    fastp \
+        -i  "$IN_DIR/${SRR}_1.fastq.gz" \
+        -I  "$IN_DIR/${SRR}_2.fastq.gz" \
+        -o  "$OUT_DIR/${SRR}_1_trimmed.fastq.gz" \
+        -O  "$OUT_DIR/${SRR}_2_trimmed.fastq.gz" \
+        --thread $SLURM_CPUS_PER_TASK \
+        --trim_poly_g --cut_tail \
+        -h "$REPORT_DIR/${SRR}_fastp.html" \
+        -j "$REPORT_DIR/${SRR}_fastp.json"
+elif [ "$LAYOUT" = "SE" ]
+then
+    fastp \
+        -i "$IN_DIR/${SRR}.fastq.gz" \
+        -o "$OUT_DIR/${SRR}_trimmed.fastq.gz" \
+        --thread $SLURM_CPUS_PER_TASK \
+        --trim_poly_g --cut_tail \
+        -h "$REPORT_DIR/${SRR}_fastp.html" \
+        -j "$REPORT_DIR/${SRR}_fastp.json"
+else
+    exit 1
+fi
+```
+
+## Quality Control (fastQC)
+
+After the trimming process is complete, we run FastQC on the trimmed files to evaluate their integrity. As too many samples are analyzed to check the reports individually, they will all be later integrated with fastp and salmon quantification reports in a single summary using MultiQC.
+
+[**submit_qc_on_trim.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+
+# GSE and samples map
+GSE=$1
+MAP_FILE="../$GSE/samples.txt"
+
+# Check map availability
+if [ ! -f "$MAP_FILE" ]
+then
+    echo "Error: $MAP_FILE not found"
+    exit 1
+fi
+
+# Submit job for each sample
+while read SAMPLE SRR
+do
+    # Follow progress
+    echo "$SAMPLE sent to SLURM"
+
+    # Submit job (example: GSE279728 c1 SRR31029281)
+    sbatch qc_on_trim.sh $GSE $SAMPLE $SRR
+
+    # 1 second sleep to avoid SLURM saturation
+    sleep 1
+done < "$MAP_FILE"
+
+# End message
+echo "----------------------"
+echo "All jobs sent to SLURM"
+```
+
+[**qc_on_trim.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+#SBATCH --job-name=fastqc_trimmed
+#SBATCH --partition=standard
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=01:00:00
+#SBATCH --output=qc_trim_%j.out
+#SBATCH --error=qc_trim_%j.err
+
+# Inputs
+GSE=$1       # Example: GSE279728
+SAMPLE=$2    # Example: c1
+SRR=$3       # Example: SRR31029281
+
+# Relative routes
+TRIM_DIR="../$GSE/samples/$SAMPLE"
+QC_DIR="../$GSE/results/qc_reports"
+
+# Detect Layout
+if [ -f "$TRIM_DIR/${SRR}_1_trimmed.fastq.gz" ] && [ -f "$TRIM_DIR/${SRR}_2_trimmed.fastq.gz" ]
+then
+    LAYOUT="PE"
+elif [ -f "$TRIM_DIR/${SRR}_trimmed.fastq.gz" ]
+then
+    LAYOUT="SE"
+else
+    exit 1
+fi
+
+# Create qc_reports directory
+mkdir -p "$QC_DIR"
+
+# Load and run FastQC
+module load FastQC/0.12.1-Java-11
+
+if [ "$LAYOUT" = "PE" ]
+then
+    fastqc \
+        "$TRIM_DIR/${SRR}_1_trimmed.fastq.gz" \
+        "$TRIM_DIR/${SRR}_2_trimmed.fastq.gz" \
+        -o "$QC_DIR" -t "$SLURM_CPUS_PER_TASK"
+elif [ "$LAYOUT" = "SE" ]
+then
+    fastqc \
+        "$TRIM_DIR/${SRR}_trimmed.fastq.gz" \
+        -o "$QC_DIR" -t "$SLURM_CPUS_PER_TASK"
+else
+    exit 1
+fi
+```
+
+## Transcript-level Quantification (Salmon)
+
+For the actual quantification step, Salmon processes the trimmed reads against the previously generated index. Crucially, we run Salmon with the `--gcBias` and `--validateMappings` flags enabled. These parameters are essential for correcting GC content deviations and validating alignments, ultimately yielding a much more precise quantification result.
+
+[**submit_quant_trim.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+
+# GSE and samples map
+GSE=$1
+MAP_FILE="../$GSE/samples.txt"
+
+# Check map availability
+if [ ! -f "$MAP_FILE" ]
+then
+    echo "Error: $MAP_FILE not found"
+    exit 1
+fi
+
+# Submit job for each sample
+while read SAMPLE SRR
+do
+    # Follow progress
+    echo "$SAMPLE sent to SLURM"
+
+    # Submit job (example: GSE279728 c1 SRR31029281)
+    sbatch read_quant_salmon_trimmed.sh $GSE $SAMPLE $SRR
+
+    # 1 second sleep to avoid SLURM saturation
+    sleep 1
+done < "$MAP_FILE"
+
+# End message
+echo "----------------------"
+echo "All jobs sent to SLURM"
+```
+
+[**read_quant_salmon_trimmed.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+#SBATCH --job-name=quant_salmon_trimmed
+#SBATCH --partition=standard
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=32G
+#SBATCH --time=01:30:00
+#SBATCH --output=quant_trim_%j.out
+#SBATCH --error=quant_trim_%j.err
+
+# Inputs
+GSE=$1       # Example: GSE279728
+SAMPLE=$2    # Example: c1
+SRR=$3       # Example: SRR31029281
+
+# Relative routes
+SALMON="../programs/salmon-latest_linux_x86_64/bin/salmon"
+INDEX="../genome/index"
+TRIM_DIR="../$GSE/samples/$SAMPLE"
+OUTDIR="../$GSE/results/quant/${SAMPLE}_trimmed_quant"
+
+# Detect Layout
+if [ -f "$TRIM_DIR/${SRR}_1_trimmed.fastq.gz" ] && [ -f "$TRIM_DIR/${SRR}_2_trimmed.fastq.gz" ]
+then
+    LAYOUT="PE"
+elif [ -f "$TRIM_DIR/${SRR}_trimmed.fastq.gz" ]
+then
+    LAYOUT="SE"
+else
+    exit 1
+fi
+
+# Create sample_trimmed_quant directory
+mkdir -p "$OUTDIR"
+
+# Run Salmon quantification
+if [ "$LAYOUT" = "PE" ]
+then
+    $SALMON quant -i "$INDEX" -l A \
+        -1 "$TRIM_DIR/${SRR}_1_trimmed.fastq.gz" \
+        -2 "$TRIM_DIR/${SRR}_2_trimmed.fastq.gz" \
+        -p $SLURM_CPUS_PER_TASK \
+        --gcBias --validateMappings \
+        -o "$OUTDIR"
+elif [ "$LAYOUT" = "SE" ]
+then
+    $SALMON quant -i "$INDEX" -l A \
+        -r "$TRIM_DIR/${SRR}_trimmed.fastq.gz" \
+        -p $SLURM_CPUS_PER_TASK \
+        --gcBias --validateMappings \
+        -o "$OUTDIR"
+else
+    exit 1
+fi
+```
+
+## Quality Control Summary (multiQC)
+
+MultiQC is used to aggregate the individual quality control reports into a single, cohesive HTML dashboard. By compiling the output logs from fastp, FastQC, and Salmon, we can easily evaluate the overall quality of the whole experiment and compare the data quality before and after the trimming step.
+
+[**multiqc_trimmed.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+#SBATCH --job-name=multiqc_trimmed
+#SBATCH --partition=standard
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=4G
+#SBATCH --time=00:30:00
+#SBATCH --output=multiqc_trim_%j.out
+#SBATCH --error=multiqc_trim_%j.err
+
+## FastQC + fastp + Salmon!!
+
+# Input
+GSE=$1   # Example: GSE279728
+
+# Relative routes
+QC_DIR="../$GSE/results/qc_reports"       
+TRIM_REPORT_DIR="../$GSE/results/trim_reports"  
+QUANT_DIR="../$GSE/results/quant"
+OUTDIR="../$GSE/results/multiqc"
+
+# Create multiqc directory
+mkdir -p "$OUTDIR"
+
+# Load and run MultiQC
+module load MultiQC/1.14-foss-2022b
+
+multiqc "$QC_DIR" "$TRIM_REPORT_DIR" "$QUANT_DIR" \
+    -o "$OUTDIR" \
+    --filename "${GSE}_trimmed_report"
+
+echo "MultiQC done"
+```
+
+## Automatic File Download
+
+To streamline the transition to R for downstream analysis, this final script automatically gathers all the necessary files we need to keep. It renames the quantification files to make them more easily recognizable in R and copies the MultiQC HTML and fastp JSON reports. Once downloaded, the remaining intermediate files can be safely deleted to free up space on the server.
+
+[**take_home.sh:**]{.underline}
+
+``` bash
+#!/bin/bash
+
+# Input
+GSE=$1
+
+# Create final folder
+DOWNLOAD_FOLDER="../${GSE}_TAKE_HOME"
+
+mkdir -p $DOWNLOAD_FOLDER
+mkdir -p "$DOWNLOAD_FOLDER/counts"
+mkdir -p "$DOWNLOAD_FOLDER/reports"
+mkdir -p "$DOWNLOAD_FOLDER/scripts"
+
+# Relative routes
+QUANT_BASE="../$GSE/results/quant"
+QC_BASE="../$GSE/results/multiqc"
+TRIM_BASE="../$GSE/results/trim_reports"
+MAP_FILE="../$GSE/samples.txt"
+
+
+echo "==> Starting file retrieval..."
+
+
+# 1. Salmon quantification files
+echo "==> Salmon quant.sf files..."
+
+while read SAMPLE SRR
+do
+    FROM="$QUANT_BASE/${SAMPLE}_trimmed_quant/quant.sf"
+    TO="$DOWNLOAD_FOLDER/counts/${SAMPLE}_quant.sf"
+    
+    if [ -f "$FROM" ]
+    then
+        cp "$FROM" "$TO"
+        echo "Copied: $SAMPLE -> ${SAMPLE}_quant.sf"
+    else
+        echo "Error: file not found for $SAMPLE in $FROM"
+        exit 1
+    fi
+done < "$MAP_FILE"
+
+
+# 2. QC reports
+
+# MultiQC
+echo "==> MultiQC HTML report..."
+cp $QC_BASE/*.html "$DOWNLOAD_FOLDER/reports/" 2>/dev/null
+
+# JSON from fastp
+echo "==> Fastp JSON reports..."
+cp $TRIM_BASE/*.json "$DOWNLOAD_FOLDER/reports/" 2>/dev/null
+
+
+# 3. Backup
+
+# Metadata
+echo "==> Backup: metadata..."
+cp "$MAP_FILE" "$DOWNLOAD_FOLDER/"
+
+# Scripts
+echo "==> Backup: scripts..."
+cp *.sh "$DOWNLOAD_FOLDER/scripts/" 2>/dev/null
+
+
+# 4. Compress for download
+echo "==> Zipping..."
+tar -czvf ../$GSE.tar.gz "$DOWNLOAD_FOLDER"
+
+
+echo "-------------------------------------------------------"
+echo "Finished"
+echo "Download: $DOWNLOAD_FOLDER, check and clean environment"
+```

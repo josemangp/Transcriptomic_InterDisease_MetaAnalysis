@@ -1,0 +1,837 @@
+---
+title: "GSE173670_Sjo"
+author: "José Manuel García Pérez"
+date: "2026-06-20"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+# Introduction
+
+# Structures
+
+## Experimental Design / Metadata
+
+```{r}
+# Load file
+metadata = read.table(file = "data/Sjo_GSE173670/Metadata_GSE173670.txt", 
+                      header = T, sep = "\t")
+
+# Available information
+colnames(metadata)
+rownames(metadata) = metadata$Sample
+
+# Select relevant information
+metadata = metadata[,c("Sample", "Run", "Condition", "Gender", "Age")]
+
+# Adapt format
+metadata$Condition  = factor(metadata$Condition)
+metadata$Gender     = factor(metadata$Gender)
+
+# Info summary
+summary(metadata)
+```
+
+## From transcript to gene level
+
+```{r}
+library(rtracklayer)
+library(tximport)
+
+  # # Get tx2gene df from the original annotation file used
+  # gtf_df = as.data.frame(import("data/Homo_sapiens.GRCh38.115.chr.gtf.gz"))
+  # tx2gene = gtf_df[gtf_df$type == "transcript", c("transcript_id", "gene_id")]
+  # tx2gene = tx2gene[!duplicated(tx2gene$transcript_id), ]
+  # rownames(tx2gene) = NULL
+  # saveRDS(tx2gene, "data/tx2gene_Ensembl115.rds")
+
+# Load the tx2gene df
+tx2gene = readRDS("data/tx2gene_Ensembl115.rds")
+head(tx2gene)
+
+# Path to the quantification files
+quant_files = file.path("data/Sjo_GSE173670/counts/",
+                        paste0(metadata$Sample, "_quant.sf"))
+
+# Import and collapse to gene level
+txi = tximport(quant_files, type = "salmon",
+               tx2gene = tx2gene, ignoreTxVersion = TRUE)
+
+# Check the final number of genes and samples
+dim(txi$counts)
+```
+
+## The DESeqDataSet
+
+```{r}
+# Create the first basic DESeqDataSet
+library(DESeq2)
+dds = DESeqDataSetFromTximport(txi     = txi,
+                               colData = metadata,
+                               design  = ~ Condition)
+
+# Ensure the reference level
+dds$Condition = relevel(x = dds$Condition, ref = "hc")
+```
+
+# Exploratory Analysis
+
+## Pre-filtering low counts / Gene-level QC
+
+```{r}
+# Smallest group?
+table(dds$Condition)
+
+# Keep genes with at least 10 counts for the smallest group size
+keep = rowSums(counts(dds) >= 10) >= 8
+dds = dds[keep,]
+
+# How many samples are removed?
+table(keep)
+```
+
+## Sample-level QC
+
+### Data Transformation
+
+```{r}
+library("vsn")
+library("ggplot2")
+
+# "basic" log2(n+1) transformation
+ntd_dds = normTransform(dds)
+
+# Variance Stabilizing Transformation (VST)
+vst_dds = vst(dds, blind=TRUE)
+
+# Compare effect on the variance
+var_raw = meanSdPlot(counts(dds), plot = FALSE)$gg + ggtitle("Raw Counts")
+var_raw
+
+var_ntd = meanSdPlot(assay(ntd_dds), plot = FALSE)$gg + ggtitle("log2(n+1)")
+var_ntd
+
+var_vst = meanSdPlot(assay(vst_dds), plot = FALSE)$gg + ggtitle("VST")
+var_vst
+
+# Final improvement in distribution check
+boxplot(counts(dds), outline=T, 
+        main ="Raw Data", xaxt="n",
+        xlab = paste0("Samples, n=", nrow(metadata)),
+        ylab = "Raw Counts",
+        col  = ifelse(metadata$Condition == "hc", "skyblue", "salmon"),
+        ylim = c(min(counts(dds))-1, max(counts(dds))+3))
+legend(x = "topright", legend = c("Control", "Target"), 
+       fill = c("skyblue", "salmon"), bty = "n", cex = 0.8)
+
+
+boxplot(assay(vst_dds), outline=T, 
+        main ="VST", xaxt="n",
+        xlab = paste0("Samples, n=", nrow(metadata)),
+        ylab = "Transformed Counts",
+        col  = ifelse(metadata$Condition == "hc", "skyblue", "salmon"),
+        ylim = c(min(assay(vst_dds))-1, max(assay(vst_dds))+3))
+legend(x = "topright", legend = c("Control", "Target"), 
+       fill = c("skyblue", "salmon"), bty = "n", cex = 0.8)
+```
+
+### Principal Components Analysis (PCA)
+
+```{r}
+# Gender
+plotPCA(vst_dds,
+        intgroup = c("Gender"),
+        ntop = 500,
+        pcsToUse = 1:2) + 
+  stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+  scale_color_manual(values = c("palegreen3", "plum"))
+
+# Age
+plotPCA(vst_dds,
+        intgroup = c("Age"),
+        ntop = 500,
+        pcsToUse = 1:2)
+
+# Deeper exploration - potential outliers
+library(ggrepel)
+
+for (i in c(500,2000,10000)){
+  p = plotPCA(vst_dds,
+              intgroup = c("Condition"),
+              ntop = i,
+              pcsToUse = 1:2) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      scale_color_manual(values = c("skyblue","palegreen3","plum")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+}  
+
+for (i in c(500,2000,10000)){
+  p = plotPCA(vst_dds,
+              intgroup = c("Condition"),
+              ntop = i,
+              pcsToUse = c(1,3)) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      scale_color_manual(values = c("skyblue","palegreen3","plum")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+}  
+
+for (i in c(500,2000,10000)){
+  p = plotPCA(vst_dds,
+              intgroup = c("Condition"),
+              ntop = i,
+              pcsToUse = c(2,3)) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      scale_color_manual(values = c("skyblue","palegreen3","plum")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+}  
+
+
+# Specific comparisons
+
+for (i in c(500,2000,10000)){
+  p = plotPCA(vst_dds[,vst_dds$Condition %in% c("hc","nS")],
+              intgroup = c("Condition"),
+              ntop = i,
+              pcsToUse = 1:2) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      scale_color_manual(values = c("skyblue","palegreen3")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+} 
+
+for (i in c(500,2000,10000)){
+  p = plotPCA(vst_dds[,vst_dds$Condition %in% c("hc","pSS")],
+              intgroup = c("Condition"),
+              ntop = i,
+              pcsToUse = 1:2) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      scale_color_manual(values = c("skyblue","plum")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+}  
+```
+
+### Sample clustering
+
+```{r}
+library(pheatmap)
+library(RColorBrewer)
+
+# Define groups and colors
+df_anno = as.data.frame(metadata[, c("Condition"),drop=F])
+
+ann_colors = list(Condition  = c(hc = "lightblue", nS = "palegreen3", pSS = "plum"))
+
+# Distance-based heatmap
+dist_matrix = as.matrix(dist(t(assay(vst_dds))))
+
+pheatmap(dist_matrix,
+         col = colorRampPalette(rev(brewer.pal(9, "Reds")))(255),
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(dist_matrix),
+         clustering_distance_cols = as.dist(dist_matrix),
+         treeheight_col = 0,
+         annotation_row = df_anno, annotation_col = df_anno,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Distance (VST)",
+         border_color = NA)
+
+# Correlation-based heatmap
+cor_matrix = cor(assay(vst_dds), method = "pearson")
+
+# Create fixed color fade to compare after QC
+n_breaks = 255
+breaks_fixed = seq(min(cor_matrix), max(cor_matrix), length.out = n_breaks+1)
+colors_fixed = colorRampPalette(brewer.pal(9, "Reds"))(n_breaks)
+
+pheatmap(cor_matrix,
+         breaks = breaks_fixed,
+         col = colors_fixed,
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(1 - cor_matrix),
+         clustering_distance_cols = as.dist(1 - cor_matrix),
+         treeheight_col = 0,
+         annotation_row = df_anno, annotation_col = df_anno,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Correlation (VST)",
+         border_color = NA)
+
+# Find the correlation outlier(s)
+mean_cor = colMeans(cor_matrix)
+sort(mean_cor)[1:10]
+
+
+#### Subsets
+
+## nS
+
+target_samples = colData(vst_dds)$Condition %in% c("hc", "nS")
+vst_subset = assay(vst_dds)[, target_samples]
+df_anno_subset = as.data.frame(colData(vst_dds)[target_samples, "Condition", drop=FALSE])
+
+
+# Distance-based
+dist_matrix_subset = as.matrix(dist(t(vst_subset)))
+
+pheatmap(dist_matrix_subset,
+         col = colorRampPalette(rev(brewer.pal(9, "Reds")))(255),
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(dist_matrix_subset),
+         clustering_distance_cols = as.dist(dist_matrix_subset),
+         treeheight_col = 0,
+         annotation_row = df_anno_subset, annotation_col = df_anno_subset,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Distance (nS)",
+         border_color = NA)
+
+# Correlation-based
+cor_matrix_subset = cor(vst_subset, method = "pearson")
+
+pheatmap(cor_matrix_subset,
+         breaks = breaks_fixed,
+         col = colors_fixed,
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(1 - cor_matrix_subset),
+         clustering_distance_cols = as.dist(1 - cor_matrix_subset),
+         treeheight_col = 0,
+         annotation_row = df_anno_subset, annotation_col = df_anno_subset,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Correlation (nS)",
+         border_color = NA)
+
+mean_cor_subset = colMeans(cor_matrix_subset)
+sort(mean_cor_subset)[1:10]
+
+## pSS
+
+target_samples = colData(vst_dds)$Condition %in% c("hc", "pSS")
+vst_subset = assay(vst_dds)[, target_samples]
+df_anno_subset = as.data.frame(colData(vst_dds)[target_samples, "Condition", drop=FALSE])
+
+
+# Distance-based
+dist_matrix_subset = as.matrix(dist(t(vst_subset)))
+
+pheatmap(dist_matrix_subset,
+         col = colorRampPalette(rev(brewer.pal(9, "Reds")))(255),
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(dist_matrix_subset),
+         clustering_distance_cols = as.dist(dist_matrix_subset),
+         treeheight_col = 0,
+         annotation_row = df_anno_subset, annotation_col = df_anno_subset,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Distance (pSS)",
+         border_color = NA)
+
+# Correlation-based
+cor_matrix_subset = cor(vst_subset, method = "pearson")
+
+pheatmap(cor_matrix_subset,
+         breaks = breaks_fixed,
+         col = colors_fixed,
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(1 - cor_matrix_subset),
+         clustering_distance_cols = as.dist(1 - cor_matrix_subset),
+         treeheight_col = 0,
+         annotation_row = df_anno_subset, annotation_col = df_anno_subset,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Correlation (pSS)",
+         border_color = NA)
+
+mean_cor_subset = colMeans(cor_matrix_subset)
+sort(mean_cor_subset)[1:10]
+```
+
+## Final Model Definition / Model-level QC
+
+```{r}
+## IMPORTANT: While unsupervised exploratory analysis gives better visualizations when treated as 
+# two different datasets, the control subjects are the same and, statistically, we gain more power due to sample
+# size if they remain joined (better experiment noise reduction)
+
+# No clear outliers must be removed (pre/post-analysis)
+# Preliminary model
+dds = DESeq(dds)
+plotDispEsts(dds, main = "Dispersion Diagnosis - Preliminary")
+
+# Remove outliers
+# Post-analysis, this two samples were identical to hc. As we cannot confirm a mislabelling, they are eliminated
+dds = dds[, !dds$Sample %in% c("ss4","ss8")]
+
+# Final model
+dds = DESeq(dds)
+plotDispEsts(dds, main = "Dispersion Diagnosis - Final Design")
+
+# Now we don't need a blind design
+vst_dds = vst(dds, blind=FALSE)
+
+# Improvement in pSS?
+for (i in c(500,2000,10000)){
+  p = plotPCA(vst_dds[,vst_dds$Condition %in% c("hc","pSS")],
+              intgroup = c("Condition"),
+              ntop = i,
+              pcsToUse = 1:2) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      scale_color_manual(values = c("skyblue","plum")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+}  
+
+target_samples = colData(vst_dds)$Condition %in% c("hc", "pSS")
+vst_subset = assay(vst_dds)[, target_samples]
+df_anno_subset = as.data.frame(colData(vst_dds)[target_samples, "Condition", drop=FALSE])
+
+cor_matrix_subset = cor(vst_subset, method = "pearson")
+
+pheatmap(cor_matrix_subset,
+         breaks = breaks_fixed,
+         col = colors_fixed,
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(1 - cor_matrix_subset),
+         clustering_distance_cols = as.dist(1 - cor_matrix_subset),
+         treeheight_col = 0,
+         annotation_row = df_anno_subset, annotation_col = df_anno_subset,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Correlation (pSS)",
+         border_color = NA)
+```
+
+# Differential Expression Analysis (DEA)
+
+## Contrasts and Shrinkage
+
+```{r}
+# IMPORTANT: contrast = c("design_column", "target", "reference")
+
+# Obtain results for the desired contrasts and shrink
+
+# nS
+res_nS = results(dds, contrast=c("Condition", "nS", "hc"), 
+                 alpha=0.05)
+summary(res_nS)
+
+res_nS_sh = lfcShrink(dds, contrast=c("Condition", "nS", "hc"), 
+                       res=res_nS, type="ashr")
+summary(res_nS_sh)
+
+# pSS
+
+res_pSS = results(dds, contrast=c("Condition", "pSS", "hc"), 
+                  alpha=0.05)
+summary(res_pSS)
+
+res_pSS_sh = lfcShrink(dds, contrast=c("Condition", "pSS", "hc"), 
+                       res=res_pSS, type="ashr")
+summary(res_pSS_sh)
+```
+
+## MA plot
+
+```{r}
+# Personalized function
+deseq_maplot_DEG = function(contrast.res, title_text = "MA-plot: DEGs") {
+  
+  # Find significant genes without biological threshold
+  df = as.data.frame(contrast.res)
+  df$sig = ifelse(!is.na(df$padj) & df$padj < 0.05, "Significant", "Not Significant")
+  
+  # Styling the plot
+  ggplot(df, aes(x = baseMean, y = log2FoldChange, color = sig)) +
+    geom_point(alpha = 0.5, size = 1.2) +
+    scale_x_log10() + 
+    scale_color_manual(values = c("Significant" = "coral", 
+                                  "Not Significant" = "grey70")) +
+    geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.5) +
+    labs(title = title_text, 
+         subtitle = paste("Significant (p-adj <0.05):", sum(df$sig == "Significant")),
+         x = "Mean of Normalized Counts", 
+         y = "Log2 Fold Change", 
+         color = "") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+}
+
+# Comparing MA plots
+deseq_maplot_DEG(res_nS, "MA Plot: Sicca")
+deseq_maplot_DEG(res_pSS, "MA Plot: Sjögren")
+
+deseq_maplot_DEG(res_nS_sh, "MA Plot: Sicca (Shrink)")
+deseq_maplot_DEG(res_pSS_sh, "MA Plot: Sjögren (Shrink)")
+```
+
+## Volcano plot
+
+```{r}
+## FC threshold was changed from 2 to 1.5!!
+
+# Personalized function
+deseq_volcano_DEG = function(contrast.res,title_text = "Volcano Plot: DEGs"){
+  
+  # Find significant and substantial DEGs
+  plot_data = as.data.frame(contrast.res)
+  
+  plot_data$diff_state = "Not significant"
+  plot_data$diff_state[plot_data$log2FoldChange > log2(1.5) & 
+                         plot_data$padj < 0.05] = "Activated"
+  plot_data$diff_state[plot_data$log2FoldChange < -log2(1.5) & 
+                         plot_data$padj < 0.05] = "Repressed"
+
+  plot_data$diff_state = factor(plot_data$diff_state, 
+                                levels = c("Repressed","Activated","Not significant"))
+  
+  # Styling the plot
+  ggplot(plot_data, aes(x = log2FoldChange, y = -log10(padj), color = diff_state)) +
+    geom_point(alpha = 0.5, size = 1.2) +
+    scale_color_manual(values = c("Repressed" = "blue", 
+                                  "Activated" = "red",
+                                  "Not significant" = "grey70")) +
+    geom_vline(xintercept = c(-log2(1.5), log2(1.5)), 
+               linetype = "dashed", color = "black", alpha = 0.5) +
+    geom_hline(yintercept = -log10(0.05), 
+               linetype = "dashed", color = "black", alpha = 0.5) +
+    labs(title = title_text,
+         subtitle = paste("Repressed:", sum(plot_data$diff_state == "Repressed"),
+                          "| Activated:", sum(plot_data$diff_state == "Activated")),
+         x = "log2 Fold Change",
+         y = "-log10 p-adj value",
+         color = "") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+}
+
+# Comparing volcano plots
+deseq_volcano_DEG(res_nS, "Volcano Plot: Sicca")
+deseq_volcano_DEG(res_pSS, "Volcano Plot: Sjögren")
+
+deseq_volcano_DEG(res_nS_sh, "Volcano Plot: Sicca (Shrink)")
+deseq_volcano_DEG(res_pSS_sh, "Volcano Plot: Sjögren (Shrink)")
+```
+
+## Top DEGs Heatmap
+
+```{r}
+# nS
+
+# Select top DEGs and check consistency
+top_genes_sh = head(order(res_nS_sh$padj), 100)
+
+# Transformed data and centered
+mat = assay(vst_dds)[top_genes_sh, dds$Condition %in% c("hc", "nS")]
+mat = mat - rowMeans(mat)
+
+max_val = 1.5 # max(abs(mat))
+my_breaks = seq(-max_val, max_val, length.out = 51)
+
+pheatmap(mat, 
+         annotation_col = df_anno, annotation_colors = ann_colors,
+         annotation_names_col = FALSE,
+         show_colnames = F, show_rownames = F,
+         cluster_rows = T, clustering_method = "ward.D2",
+         main = "Top 100 DEGs: Sicca",
+         breaks = my_breaks,
+         color = colorRampPalette(c("blue", "white", "red"))(50))
+
+# pSS
+
+# Select top DEGs and check consistency
+top_genes_sh = head(order(res_pSS_sh$padj), 100)
+
+# Transformed data and centered
+mat = assay(vst_dds)[top_genes_sh, dds$Condition %in% c("hc", "pSS")]
+mat = mat - rowMeans(mat)
+
+max_val = 1.5 # max(abs(mat))
+my_breaks = seq(-max_val, max_val, length.out = 51)
+
+pheatmap(mat, 
+         annotation_col = df_anno, annotation_colors = ann_colors,
+         annotation_names_col = FALSE,
+         show_colnames = T, show_rownames = F,
+         cluster_rows = T, clustering_method = "ward.D2",
+         main = "Top 100 DEGs: Sjögren",
+         breaks = my_breaks,
+         color = colorRampPalette(c("blue", "white", "red"))(50))
+```
+
+# Enrichment Analysis
+
+## Extract DEGs
+
+```{r}
+# nS
+
+# Upregulated DEGs
+upreg_deseq_nS = subset(res_nS_sh, padj < 0.05 & log2FoldChange > log2(1.5))
+nrow(upreg_deseq_nS)
+upreg_genes_nS = rownames(upreg_deseq_nS)
+
+# Downregulated DEGs
+downreg_deseq_nS = subset(res_nS_sh, padj < 0.05 & log2FoldChange < -log2(1.5))
+nrow(downreg_deseq_nS)
+downreg_genes_nS = rownames(downreg_deseq_nS)
+
+# pSS
+
+# Upregulated DEGs
+upreg_deseq_pSS = subset(res_pSS_sh, padj < 0.05 & log2FoldChange > log2(1.5))
+nrow(upreg_deseq_pSS)
+upreg_genes_pSS = rownames(upreg_deseq_pSS)
+
+# Downregulated DEGs
+downreg_deseq_pSS = subset(res_pSS_sh, padj < 0.05 & log2FoldChange < -log2(1.5))
+nrow(downreg_deseq_pSS)
+downreg_genes_pSS = rownames(downreg_deseq_pSS)
+```
+
+## Gene Ontology Enrichment
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+
+# No DEGs for nS
+
+# pSS
+
+go_upreg_pSS  =  enrichGO(gene          = upreg_genes_pSS,
+                      OrgDb         = org.Hs.eg.db,
+                      keyType       = "ENSEMBL",
+                      ont           = "BP",
+                      pAdjustMethod = "BH",
+                      pvalueCutoff  = 0.05,
+                      qvalueCutoff  = 0.05)
+
+df_temp = as.data.frame(go_upreg_pSS)
+
+barplot(go_upreg_pSS,showCategory = 12)
+dotplot(go_upreg_pSS,showCategory = 12)
+treeplot(pairwise_termsim(go_upreg_pSS),showCategory = 12)
+emapplot(pairwise_termsim(go_upreg_pSS),showCategory = 12)
+cnetplot(go_upreg_pSS,showCategory = 12)
+
+go_downreg_pSS  =  enrichGO(gene        = downreg_genes_pSS,
+                      OrgDb         = org.Hs.eg.db,
+                      keyType       = "ENSEMBL",
+                      ont           = "BP",
+                      pAdjustMethod = "BH",
+                      pvalueCutoff  = 0.05,
+                      qvalueCutoff  = 0.05)
+
+df_temp = as.data.frame(go_downreg_pSS)
+
+barplot(go_downreg_pSS,showCategory = 12)
+dotplot(go_downreg_pSS,showCategory = 12)
+treeplot(pairwise_termsim(go_downreg_pSS),showCategory = 12)
+emapplot(pairwise_termsim(go_downreg_pSS),showCategory = 12)
+cnetplot(go_downreg_pSS,showCategory = 12)
+```
+
+## KEGG Enrichment
+
+```{r}
+gene_conv_upreg = bitr(upreg_genes_pSS, 
+                       fromType = "ENSEMBL", 
+                       toType   = "ENTREZID", 
+                       OrgDb    = org.Hs.eg.db)
+
+upreg_entrez = gene_conv_upreg$ENTREZID
+
+
+kegg_upreg = enrichKEGG(gene          = upreg_entrez,
+                        organism      = 'hsa',
+                        pAdjustMethod = "BH",
+                        pvalueCutoff  = 0.05)
+
+df_temp = as.data.frame(kegg_upreg)
+
+barplot(kegg_upreg,showCategory = 12)
+dotplot(kegg_upreg,showCategory = 12)
+treeplot(pairwise_termsim(kegg_upreg),showCategory = 12)
+emapplot(pairwise_termsim(kegg_upreg),showCategory = 12)
+cnetplot(kegg_upreg,showCategory = 12)
+```
+
+## Pathway Enrichment
+
+```{r, eval=F}
+# library(pathview)
+# 
+# # Make an Ensembl to Entrez conversion
+# res_df = as.data.frame(res_pSS_sh)
+# res_df$ensembl = rownames(res_df)
+# 
+# ids = bitr(res_df$ensembl, 
+#            fromType = "ENSEMBL", 
+#            toType   = "ENTREZID", 
+#            OrgDb    = org.Hs.eg.db)
+# 
+# # Pathview needs a named vector (log2FC associated to ENtrezID)
+# input_data = merge(res_df, ids, by.x = "ensembl", by.y = "ENSEMBL")
+# gene_list = input_data$log2FoldChange
+# names(gene_list) = input_data$ENTREZID
+# 
+# # Pathview example
+# pathview(gene.data  = gene_list,
+#          pathway.id = "hsa04621", # "NOD-like receptor signaling pathway"
+#          species    = "hsa",
+#          limit      = list(gene = 1, cpd = 1),
+#          low        = "blue",
+#          mid        = "gray",
+#          high       = "red",)
+```
+
+## GeneSet Enrichment
+
+```{r}
+## nS
+
+# Rank genes and omit NAs
+ranked_genes = sign(res_nS_sh$log2FoldChange) * -log10(res_nS_sh$pvalue)
+names(ranked_genes) = rownames(res_nS_sh)
+ranked_genes = sort(na.omit(ranked_genes), decreasing = TRUE)
+
+# GO GSEA
+gsea_go = gseGO(geneList     = ranked_genes,
+                OrgDb        = org.Hs.eg.db,
+                keyType      = "ENSEMBL",
+                ont          = "BP",
+                minGSSize    = 15,
+                maxGSSize    = 500,
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "BH",
+                seed         = 123)
+
+dotplot(gsea_go, showCategory = 12, split = ".sign") + 
+  facet_grid(. ~ .sign)
+
+ridgeplot(gsea_go, showCategory = 12)
+
+
+# KEGG GSEA
+
+# Entrez ID needed
+ids_gsea = bitr(names(ranked_genes),
+                fromType = "ENSEMBL",
+                toType   = "ENTREZID",
+                OrgDb    = org.Hs.eg.db)
+ranked_entrez = ranked_genes[ids_gsea$ENSEMBL]
+names(ranked_entrez) = ids_gsea$ENTREZID
+ranked_entrez = ranked_entrez[!duplicated(names(ranked_entrez))]
+ranked_entrez = sort(ranked_entrez, decreasing = TRUE)
+
+gsea_kegg = gseKEGG(geneList      = ranked_entrez,
+                    organism      = "hsa",
+                    minGSSize     = 15,
+                    maxGSSize     = 500,
+                    pvalueCutoff  = 0.05,
+                    pAdjustMethod = "BH",
+                    seed          = 123)
+
+dotplot(gsea_kegg, showCategory = 12, split = ".sign") + 
+  facet_grid(. ~ .sign)
+
+## pSS
+
+# Rank genes and omit NAs
+ranked_genes = sign(res_pSS_sh$log2FoldChange) * -log10(res_pSS_sh$pvalue)
+names(ranked_genes) = rownames(res_pSS_sh)
+ranked_genes = sort(na.omit(ranked_genes), decreasing = TRUE)
+
+# GO GSEA
+gsea_go = gseGO(geneList     = ranked_genes,
+                OrgDb        = org.Hs.eg.db,
+                keyType      = "ENSEMBL",
+                ont          = "BP",
+                minGSSize    = 15,
+                maxGSSize    = 500,
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "BH",
+                seed         = 123)
+
+dotplot(gsea_go, showCategory = 12, split = ".sign") + 
+  facet_grid(. ~ .sign)
+
+ridgeplot(gsea_go, showCategory = 12)
+
+
+# KEGG GSEA
+
+# Entrez ID needed
+ids_gsea = bitr(names(ranked_genes),
+                fromType = "ENSEMBL",
+                toType   = "ENTREZID",
+                OrgDb    = org.Hs.eg.db)
+ranked_entrez = ranked_genes[ids_gsea$ENSEMBL]
+names(ranked_entrez) = ids_gsea$ENTREZID
+ranked_entrez = ranked_entrez[!duplicated(names(ranked_entrez))]
+ranked_entrez = sort(ranked_entrez, decreasing = TRUE)
+
+gsea_kegg = gseKEGG(geneList      = ranked_entrez,
+                    organism      = "hsa",
+                    minGSSize     = 15,
+                    maxGSSize     = 500,
+                    pvalueCutoff  = 0.05,
+                    pAdjustMethod = "BH",
+                    seed          = 123)
+
+dotplot(gsea_kegg, showCategory = 12, split = ".sign") + 
+  facet_grid(. ~ .sign)
+```
+
+## Export information for web tools and integration
+
+```{r}
+GSE173670 = list(metadata = colData(dds),                  
+                 dds = dds,                  
+                 res_nS = as.data.frame(res_nS_sh),                  
+                 res_pSS = as.data.frame(res_pSS_sh),                  
+                 VST = vst_dds)  
+
+saveRDS(object = GSE173670, file = "data/Outputs/GSE173670.rds")
+```
+
+------------------------------------------------------------------------
+
+#### Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,469 @@
+---
+title: "Integrative Analysis - II"
+author: "José Manuel García Pérez"
+date: "2026-06-20"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+# Introduction
+
+In the previous notebooks, individual RNA-seq datasets spanning several autoimmune diseases were pre-processed, quantified, analyzed and integrated under a unified pipeline. The primary goal of this last integrative notebook is to correlate the Autoimmunity Core Signature, a set of genes consistently dysregulated across these distinct systemic conditions, with real-world flow cytometry data of monocytes from cGVHD patients.
+
+## Phenotype Exploratory Analysis
+
+The BIOALO database comprises monocyte immunophenotyping from 116 subjects stratified by cGVHD status across up to three post-transplant time points (D+100, D+180 and D+270). Prior to any integration with transcriptomic data, a phenotypic exploratory analysis is conducted to characterize monocyte subset distributions.
+
+Absolute counts, relative proportions and CD115 MFI for classical, intermediate and non-classical monocytes are visualized as grouped boxplots stratified by time point and cGVHD status. Cross-sectional differences between cGVHD and non-cGVHD groups at each time point are subsequently assessed using the Wilcoxon rank-sum test.
+
+```{r}
+library(readxl)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(ggpubr)
+library(rstatix)
+library(lme4)
+library(lmerTest)
+
+# Visualize
+cytobase = read_excel("data/BIOALO_cGVHD_monocytes.xlsx")
+
+# Adapt format
+cytobase$cGVHD = factor(cytobase$cGVHD, levels = c("No","Yes"))
+cytobase$TimePoint = factor(cytobase$TimePoint, levels = c("D+100", "D+180", "D+270"))
+
+#### STATIC PLOTTING
+
+exploratory_all_days = function(cytobase){
+  
+  # Variables
+  vars_abs = c("Monocytes_μL", 
+               "cMonocytes_μL", 
+               "intMonocytes_μL", 
+               "ncMonocytes_μL")
+  vars_pct = c("cMonocytes_por", 
+               "intMonocytes_por", 
+               "ncMonocytes_por")
+  vars_mfi = c("Monocytes_MFI_CD115",
+               "cMonocytes_MFI_CD115",
+               "intMonocytes_MFI_CD115",
+               "ncMonocytes_MFI_CD115")
+
+  # Plotting function
+  plot_cyto_comparison = function(data, vars, title, y_label) {
+    
+    # Standard format
+    data_long = data %>%
+      select(cGVHD, TimePoint, all_of(vars)) %>% 
+      pivot_longer(cols = -c(cGVHD, TimePoint), names_to = "Variable", values_to = "Value") %>% 
+      mutate(
+        Variable = gsub("_μL|_por|_MFI_CD115", "", Variable),
+        Variable = case_when(
+          Variable == "Monocytes" ~ "All",
+          Variable == "cMonocytes" ~ "Classical",
+          Variable == "intMonocytes" ~ "Intermediate",
+          Variable == "ncMonocytes" ~ "Non-classical",
+          TRUE ~ Variable
+        ),
+        Variable = factor(Variable, levels = c("All", "Classical", "Intermediate", "Non-classical"))
+      )
+    
+    # Quantile limit to avoid problematic visualization
+    y_limit = quantile(data_long$Value, 0.99, na.rm = TRUE)
+    
+    # Boxplots
+    ggplot(data_long, aes(x = Variable, y = Value, fill = cGVHD)) +
+      geom_boxplot(outlier.shape = NA, alpha = 0.7, position = position_dodge(width = 0.8)) +
+      geom_jitter(aes(color = cGVHD), 
+                  position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
+                  size = 1.2, alpha = 0.6) +
+      
+      # Format
+      facet_grid(~ TimePoint) +
+      coord_cartesian(ylim = c(0, y_limit)) +
+      
+      scale_fill_manual(values = c("No" = "#85C1E9", "Yes" = "#F1948A")) +
+      scale_color_manual(values = c("No" = "#2874A6", "Yes" = "#B03A2E")) +
+      labs(title = title, x = NULL, y = y_label) +
+      theme_bw(base_size = 14) + 
+      theme(
+        legend.position = "top",
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1), 
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        strip.text = element_text(face = "bold", size = 13), 
+        strip.background = element_rect(fill = "white", color = "black"), 
+        plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+      )
+  }
+  
+  # Print graphics
+  p1 = plot_cyto_comparison(cytobase, vars_abs, "Monocyte Subsets (μL) by Time Point", "μL")
+  p2 = plot_cyto_comparison(cytobase, vars_pct, "Monocyte Subsets (%) by Time Point", "%")
+  p3 = plot_cyto_comparison(cytobase, vars_mfi, "CD115 MFI by Monocyte Subset & Time Point", "MFI")
+  
+  print(p1)
+  print(p2)
+  print(p3)
+}
+
+# Get results
+exploratory_all_days(cytobase)
+
+
+## Statistics
+
+vars_interest = c("cMonocytes_por",
+                  "intMonocytes_por",
+                  "ncMonocytes_por",
+                  "cMonocytes_MFI_CD115",
+                  "intMonocytes_MFI_CD115",
+                  "ncMonocytes_MFI_CD115",
+                  "Monocytes_μL")
+
+# Time point statistics
+stat_results = cytobase %>%
+  group_by(TimePoint) %>%
+  summarise(across(all_of(vars_interest),
+                   list(
+                     p = ~wilcox.test(.[cGVHD=="Yes"], .[cGVHD=="No"],
+                                      exact=FALSE)$p.value,
+                     median_yes = ~median(.[cGVHD=="Yes"], na.rm=TRUE),
+                     median_no  = ~median(.[cGVHD=="No"],  na.rm=TRUE)
+                   )))
+```
+
+To formally assess whether monocyte subset dynamics differed between cGVHD and non-cGVHD patients over time, linear mixed-effects models are fitted by maximum likelihood for each variable of interest, with patient identifier included as a random intercept to account for repeated measures. Time point was encoded as a continuous numeric variable (days post-transplant: 100, 180, 270) and cGVHD status as a binary variable. The interaction term cGVHD × TimePoint was the primary coefficient of interest. The following plots illustrate the mean ± SE temporal trajectories for each subset and variable.
+
+```{r}
+#### MIXED MODELS (cGVHD evolution or not)
+
+# Variables for mixed modlling
+cytobase$TimePoint_num = case_when(
+  cytobase$TimePoint == "D+100" ~ 100,
+  cytobase$TimePoint == "D+180" ~ 180,
+  cytobase$TimePoint == "D+270" ~ 270
+)
+cytobase$cGVHD_bin = as.numeric(cytobase$cGVHD == "Yes")
+
+## Percentages
+lmer_c_por = lmer(cMonocytes_por ~ cGVHD_bin * TimePoint_num + (1|Code),
+                  data = cytobase, REML = FALSE)
+lmer_i_por = lmer(intMonocytes_por ~ cGVHD_bin * TimePoint_num + (1|Code),
+                  data = cytobase, REML = FALSE)
+lmer_nc_por = lmer(ncMonocytes_por ~ cGVHD_bin * TimePoint_num + (1|Code),
+                   data = cytobase, REML = FALSE)
+
+summary(lmer_c_por)
+summary(lmer_i_por)
+summary(lmer_nc_por)
+
+# Evolution in %
+plot_por = cytobase %>%
+  select(Code, cGVHD, TimePoint, cMonocytes_por, intMonocytes_por, ncMonocytes_por) %>%
+  pivot_longer(cols = ends_with("_por"), names_to = "Monocyte_Type", values_to = "Percentage") %>%
+  mutate(Monocyte_Type = factor(Monocyte_Type, 
+                                levels = c("cMonocytes_por", "intMonocytes_por", "ncMonocytes_por"),
+                                labels = c("Classical", "Intermediate", "Non-classical"))) %>%
+  group_by(Monocyte_Type, cGVHD, TimePoint) %>%
+  summarise(mean = mean(Percentage, na.rm=TRUE),
+            se   = sd(Percentage, na.rm=TRUE)/sqrt(n()),
+            .groups = "drop") %>%
+  ggplot(aes(x = TimePoint, y = mean, color = cGVHD, group = cGVHD)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se), width = 0.1) +
+  facet_wrap(~ Monocyte_Type, scales = "free_y") +
+  scale_color_manual(values = c("No" = "#2874A6", "Yes" = "#B03A2E")) +
+  labs(title = "Monocyte Subsets (%) over time",
+       x = NULL, y = "%", color = "cGVHD") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+
+print(plot_por)
+
+## CD115 MFI
+lmer_c_mfi = lmer(cMonocytes_MFI_CD115 ~ cGVHD_bin * TimePoint_num + (1|Code),
+                  data = cytobase, REML = FALSE)
+lmer_i_mfi = lmer(intMonocytes_MFI_CD115 ~ cGVHD_bin * TimePoint_num + (1|Code),
+                  data = cytobase, REML = FALSE)
+lmer_nc_mfi = lmer(ncMonocytes_MFI_CD115 ~ cGVHD_bin * TimePoint_num + (1|Code),
+                   data = cytobase, REML = FALSE)
+
+summary(lmer_c_mfi)
+summary(lmer_i_mfi)
+summary(lmer_nc_mfi)
+
+# Evolution in MFI
+plot_mfi = cytobase %>%
+  select(Code, cGVHD, TimePoint, cMonocytes_MFI_CD115, intMonocytes_MFI_CD115, ncMonocytes_MFI_CD115) %>%
+  pivot_longer(cols = ends_with("_MFI_CD115"), names_to = "Monocyte_Type", values_to = "MFI") %>%
+  mutate(Monocyte_Type = factor(Monocyte_Type, 
+                                levels = c("cMonocytes_MFI_CD115", "intMonocytes_MFI_CD115", "ncMonocytes_MFI_CD115"),
+                                labels = c("Classical", "Intermediate", "Non-classical"))) %>%
+  group_by(Monocyte_Type, cGVHD, TimePoint) %>%
+  summarise(mean = mean(MFI, na.rm=TRUE),
+            se   = sd(MFI, na.rm=TRUE)/sqrt(n()),
+            .groups = "drop") %>%
+  ggplot(aes(x = TimePoint, y = mean, color = cGVHD, group = cGVHD)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se), width = 0.1) +
+  facet_wrap(~ Monocyte_Type, scales = "free_y") +
+  scale_color_manual(values = c("No" = "#2874A6", "Yes" = "#B03A2E")) +
+  labs(title = "CD115 MFI over time by Monocyte Subset",
+       x = NULL, y = "Mean Fluorescence Intensity (MFI)", color = "cGVHD") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+
+print(plot_mfi)
+```
+
+## CD115 / CSF1R enrichment?
+
+True biological correlation could be done if CD115 is present in our core signature genes:
+
+```{r}
+### Descriptive DEG overlap (>= 4 diseases)
+descriptive_DEGs = read.csv(file = "data/Outputs/Metascape_Upreg_Input.csv", 
+         stringsAsFactors = F, na.strings = c("","NA"))
+DEGs_vector = unlist(descriptive_DEGs)
+DEGs_freq = table(DEGs_vector)
+
+# Get Gene Symbol for DEGs in >=diseases
+library(org.Hs.eg.db)  
+DEGs_intersec4 = mapIds(x = org.Hs.eg.db,   
+                            keys = names(DEGs_freq[DEGs_freq >=4]),   
+                            column = "SYMBOL",   
+                            keytype = "ENSEMBL",   
+                            multiVals = "first" )  
+# Clean NAs 
+DEGs_intersec4 = unname(DEGs_intersec4[!is.na(DEGs_intersec4)])
+
+### Meta-Analysis DEGs
+meta_analisis_res = read.csv(file = "data/Outputs/AutoimmunityCore_DEGs.csv")
+DEGs_meta = meta_analisis_res$Symbol
+
+# Final length
+length(DEGs_intersec4)
+length(DEGs_meta)
+
+# CD115 is NOT enriched in any approach
+"CSF1R" %in% DEGs_intersec4
+"CSF1R" %in% DEGs_meta
+```
+
+## Potential Relationships - BioGRID
+
+CSF1R is not included among the cores signature in either the overlap-based (≥4 diseases, n = 61) or meta-analysis (n = 41) approaches, confirming that CD115 surface expression is not directly regulated at the transcriptional level by the autoimmunity core signature identified. To explore potential indirect relationships, direct protein-protein interactors of CD115 (CSF1R) are retrieved from BioGRID.
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggVennDiagram)
+
+
+### Search for CSF1R done directly in BioGRID
+biogrid_ppi = read_tsv("data/BioGRID/BIOGRID-GENE-107823-5.0.258.tab3.txt")
+
+# Extract interactors
+# Two columns: "Interactor A" and "Interactor B", being CSF1R always one
+BioGRID_CSFR1_genes = biogrid_ppi %>%
+  dplyr::select(`Official Symbol Interactor A`, `Official Symbol Interactor B`) %>%
+  unlist() %>%
+  unique() %>%
+  setdiff(c("CSF1R", "-", NA))
+
+
+length(BioGRID_CSFR1_genes)
+
+# Compare the gene lists
+compare_DEG_list = list(Overlaps = DEGs_intersec4,
+                        MetaAnalysis = DEGs_meta,
+                        BioGRID = BioGRID_CSFR1_genes)
+
+
+ggVennDiagram(compare_DEG_list, 
+              label_alpha = 0,
+              label_color = "black",
+              edge_lty = "solid",
+              edge_size = 0.8
+              ) + 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1
+                       ) + 
+  theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.key.width = unit(1.5, "cm")
+       ) +
+  labs(title = "Upregulated DEGs by Approach",
+       fill = "DEGs")
+```
+
+As no overlap was identified between the 59 CSF1R interactors and either DEG list, to increase sensitivity, the query is expanded to include all surface markers used to define monocyte subpopulations in the BIOALO database and in general clinical setting: FCGR3A (CD16), CD36, SELL (CD62L), FCER1A (FcεRI) and ITGAM (CD11c).
+
+```{r}
+library(readr)
+library(dplyr)
+library(purrr)
+
+# Expand to function for all interactors
+extract_interactors = function(filepath, marker_symbol) {
+  df = read_tsv(filepath, show_col_types = FALSE)
+  
+  interactors = df %>%
+    dplyr::select(`Official Symbol Interactor A`, 
+                  `Official Symbol Interactor B`) %>%
+    unlist() %>%
+    unique() %>%
+    setdiff(c(marker_symbol, "-", NA))
+  
+  data.frame(
+    Marker     = marker_symbol,
+    Interactor = interactors,
+    stringsAsFactors = FALSE
+  )
+}
+
+# All files
+biogrid_all = bind_rows(
+  extract_interactors("data/BioGRID/BIOGRID-GENE-107823-5.0.258.tab3.txt", "CSF1R"),
+  extract_interactors("data/BioGRID/BIOGRID-GENE-108508-5.0.258.tab3.txt", "FCGR3A"),
+  extract_interactors("data/BioGRID/BIOGRID-GENE-107386-5.0.258.tab3.txt", "CD36"),
+  extract_interactors("data/BioGRID/BIOGRID-GENE-112302-5.0.258.tab3.txt", "SELL"),
+  extract_interactors("data/BioGRID/BIOGRID-GENE-108499-5.0.258.tab3.txt", "FCER1A"),
+  extract_interactors("data/BioGRID/BIOGRID-GENE-109890-5.0.258.tab3.txt", "ITGAM")
+)
+
+# Unique interactors summary
+biogrid_all %>%
+  group_by(Marker) %>%
+  summarise(n_interactors = n_distinct(Interactor))
+
+# Compare the gene lists
+compare_DEG_list = list(Overlaps = DEGs_intersec4,
+                        MetaAnalysis = DEGs_meta,
+                        BioGRID = unique(biogrid_all$Interactor))
+
+
+compare_DEG_list = list(
+  Overlaps     = as.character(trimws(DEGs_intersec4)),
+  MetaAnalysis = as.character(trimws(DEGs_meta)),
+  BioGRID      = as.character(trimws(unique(biogrid_all$Interactor)))
+)
+
+
+ggVennDiagram(compare_DEG_list, 
+              label_alpha = 0,
+              label_color = "black",
+              edge_lty = "solid",
+              edge_size = 0.8
+              ) + 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1
+                       ) + 
+  theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.key.width = unit(1.5, "cm")
+       ) +
+  labs(title = "Upregulated DEGs by Approach",
+       fill = "DEGs")
+```
+
+The expanded query yielded up to 232 unique interactors across the six cytometric markers, yet no overlap was identified with either the overlap-based or meta-analysis DEG lists. This result indicates that the autoimmunity core signature and the surface markers used for monocyte immunophenotyping operate at distinct biological layers: the transcriptomic signature captures intracellular activation states driven by interferon signalling, while cytometric markers primarily define monocyte subset identity rather than activation status. Rather than representing a negative finding, this complementarity suggests that transcriptomic and cytometric approaches provide orthogonal information about monocyte dysregulation in autoimmunity and cGVHD.
+
+### MetaScape Functional Comparison
+
+Functional clustering can be used to assess the differences or check for potential functional convergence.
+
+```{r}
+# BioGRID interactors unique list
+biogrid_symbols = unique(biogrid_all$Interactor)
+
+# Same length
+max_len = max(length(DEGs_meta), length(DEGs_intersec4), length(biogrid_symbols))
+
+metascape_comparison = data.frame(
+  Overlap = c(DEGs_intersec4, 
+                    rep("", max_len - length(DEGs_intersec4))),
+  MetaAnalysis = c(DEGs_meta, 
+                    rep("", max_len - length(DEGs_meta))),
+  BioGRID = c(biogrid_symbols, 
+                           rep("", max_len - length(biogrid_symbols))),
+  stringsAsFactors = FALSE
+)
+
+write.csv(metascape_comparison,
+          file = "data/Outputs/Metascape_CoreVsBioGRID_Input.csv",
+          row.names = FALSE,
+          quote = FALSE)
+```
+
+Thanks to MetaScape enhanced ID conversion, we detect one gene that is actually shared but with problematic naming that could not be corrected since the beginning of the workflow (lost in an initial normalized gene conversion).
+
+```{r}
+# Different names
+grep("DDX58|RIGI|RIG", DEGs_meta, value = TRUE, ignore.case = TRUE)
+grep("DDX58|RIGI|RIG", unique(biogrid_all$Interactor), value = TRUE, ignore.case = TRUE)
+grep("DDX58|RIGI|RIG", DEGs_intersec4, value = TRUE, ignore.case = TRUE)
+
+# What is the origin of the interactor?
+biogrid_all %>%
+  filter(Interactor %in% c("DDX58", "RIGI", "RIG-I")) %>%
+  select(Marker, Interactor)
+```
+
+A deeper comparison can also be helpful:
+
+```{r}
+# Comparison by marker
+markers = c("CSF1R", "FCGR3A", "CD36", "SELL", "FCER1A", "ITGAM")
+
+# Interactors by marker
+interactors_by_marker = lapply(markers, function(m) {
+  biogrid_all %>%
+    filter(Marker == m) %>%
+    pull(Interactor)
+})
+names(interactors_by_marker) = paste0("Int_", markers)
+
+# Combine lists
+all_lists = c(
+  list(
+    Overlap4     = DEGs_intersec4,
+    MetaAnalysis = DEGs_meta
+  ),
+  interactors_by_marker
+)
+
+# Adapt length
+max_len = max(sapply(all_lists, length))
+
+metascape_df = data.frame(
+  lapply(all_lists, function(x) {
+    c(x, rep("", max_len - length(x)))
+  }),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+# Export
+write.csv(metascape_df,
+          file = "data/Outputs/Metascape_DEGs_vs_BioGRID_byMarker.csv",
+          row.names = FALSE,
+          quote = FALSE)
+```
+
+#### Session Info
+
+```{r}
+sessionInfo()
+```

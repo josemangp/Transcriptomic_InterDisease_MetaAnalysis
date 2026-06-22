@@ -1,0 +1,310 @@
+---
+title: "GSE279728_SLE"
+author: "José Manuel García Pérez"
+date: "2026-06-20"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE)
+```
+
+# Introduction
+
+In these notebooks, multiple RNA-seq datasets from public repositories (GEO) focusing on purified human monocytes are analyzed. Our goal is to identify common molecular signatures across several autoimmune diseases to better understand the mechanisms underlying chronic Graft-versus-Host Disease (cGVHD). Although cGVHD is triggered by donor cells, its clinical manifestations and pathogenic mechanisms overlap significantly with systemic autoimmune diseases.
+
+To ensure further comparability across the different datasets, all samples were processed under a unified pipeline:
+
+1.  Gentrome generation and indexing (Salmon)
+2.  Download (fasterq-dump)
+3.  Trimming (fastp)
+4.  Quality control (FastQC)
+5.  Precise quantification (Salmon)
+6.  Quality control integration (MultiQC)
+
+From the original 10 datasets, 2 were excluded due to excessively low quality. Additional information of the pre-processing and quantification is provided in the correspondent file.
+
+In this part, the following files are needed to proceed:
+
+-   quant.sf: Abundance estimates for each sample.
+
+-   metadata.txt: Manually curated information about the samples.
+
+# Structures
+
+## Experimental Design / Metadata
+
+Metadata from the original studies (SRA) was unified and manually curated in Excel prior to the beginning of the standardized pipeline. For each dataset, the amount of different variables included and their completeness depend on the original researchers.
+
+```{r}
+# Load file
+metadata = read.table(file = "data/SLE_GSE279728/Metadata_GSE279728.txt", 
+                      header = T, sep = "\t")
+
+# Available information
+colnames(metadata)
+rownames(metadata) = metadata$Sample
+
+# Select relevant information
+metadata = metadata[,c("Sample", "Run", "Condition", "Instrument", "Sex")]
+
+# Adapt format
+metadata$Condition  = factor(metadata$Condition)
+metadata$Instrument = factor(metadata$Instrument)
+metadata$Sex        = factor(metadata$Sex)
+
+# Info summary
+summary(metadata)
+```
+
+## From transcript to gene level
+
+The quant.sf files show "Name", "Length", "EffectiveLength", "TPM" and "NumReads" as columns. Quantification using Salmon is done at a transcript level (Ensembl annotation), but usual gene expression studies are performed at a gene level. To do this transformation, we need an object with the files path and a tx2gene data frame with Ensembl relationships. Abundance, counts and lengths are summarized with tximport to transform the data. Ignoring the transcript version (the .x after ENSxxxxx) is crucial to avoid incompatibilities due to missing information after Salmon processing. We can make sure that our database version is exactly the same by using the annotation file (gtf) that was given to Salmon. As loading the full file is really slow, it is recommended to do it only once and save the tx2gene object itself.
+
+```{r}
+library(rtracklayer)
+library(tximport)
+
+  # # Get tx2gene df from the original annotation file used
+  # gtf_df = as.data.frame(import("data/Homo_sapiens.GRCh38.115.chr.gtf.gz"))
+  # tx2gene = gtf_df[gtf_df$type == "transcript", c("transcript_id", "gene_id")]
+  # tx2gene = tx2gene[!duplicated(tx2gene$transcript_id), ]
+  # rownames(tx2gene) = NULL
+  # saveRDS(tx2gene, "data/tx2gene_Ensembl115.rds")
+
+# Load the tx2gene df
+tx2gene = readRDS("data/tx2gene_Ensembl115.rds")
+head(tx2gene)
+
+# Path to the quantification files
+quant_files = file.path("data/SLE_GSE279728/counts",
+                        paste0(metadata$Sample, "_quant.sf"))
+
+# Import and collapse to gene level
+txi = tximport(quant_files, type = "salmon",
+               tx2gene = tx2gene, ignoreTxVersion = TRUE)
+
+# Check the final number of genes and samples
+dim(txi$counts)
+```
+
+## The DESeqDataSet
+
+DESeq2 uses an specific class that extends the RangedSummarizedExperiment class of the SummarizedExperiment package. It stores the read counts and the intermediate estimated quantities during statistical analysis. The association of assay data (the counts) with genomic ranges (the genes) facilitates downstream exploration and integration with other Bioconductor packages.
+
+A DESeqDataSet object must have an associated design formula (variables which will be used in modeling). As it can be later changed, we will first explore the most basic design, just including the "condition" information. After that, we will decide if other covariates should be taken into account. To make sure the contrasts are correctly made, it is important that the control condition is set as the reference level of the factor (the first one, being alphabetically ordered by default).
+
+```{r}
+# Create the first basic DESeqDataSet
+library(DESeq2)
+dds = DESeqDataSetFromTximport(txi     = txi,
+                               colData = metadata,
+                               design  = ~ Condition)
+
+# Ensure the reference level
+dds$Condition = relevel(x = dds$Condition, ref = "hc")
+```
+
+# Exploratory Analysis
+
+## Pre-filtering low counts / Gene-level QC
+
+As stated in the DESeq2 guide, it is not strictly necessary to pre-filter low count genes before running it. However, this can improve running times, reduce memory size and improve visualizations, as "empty" features are not plotted. The standard criteria in bulk RNA-seq with discrete groups is to remove those genes that do not have a count of at least 10 for the smallest group size.
+
+```{r}
+# Smallest group?
+table(dds$Condition)
+
+# Keep genes with at least 10 counts for the smallest group size
+keep = rowSums(counts(dds) >= 10) >= 5
+dds = dds[keep,]
+
+# How many samples are removed?
+table(keep)
+```
+
+Note: in some cases, we may have technical replicates (runs of the same sample). They should be collapsed before analyzing in order not to artificially increase correlations. However, if necessary, this step was already made by concatenation of the reads before Salmon quantification.
+
+## Sample-level QC
+
+### Data Transformation
+
+The DESeq2 differential expression analysis operates on raw counts and discrete distributions. However, for previous exploration it is useful to work with transformed versions of the count data. Two main alternative approaches are widely justified and accepted by the scientific community when working with RNA-seq discrete data. Both produce transformed data on the log2 scale which has been normalized with respect to library size or other normalization factors. The goal is to remove the dependence of the variance on the mean (particularly when it is low), without extremely removing differential variances.
+
+The Regularized Logarithm (rlog) method is recommended for small groups. In this case, we will focus on the Variance Stabilizing Transformation (VST) method, which is more precise for larger datasets (\>30 samples), way faster and more robust against outliers. If there are no previously annotated batch effects, we use a blind design for total unsupervised analysis.
+
+```{r}
+library("vsn")
+library("ggplot2")
+
+# "basic" log2(n+1) transformation
+ntd_dds = normTransform(dds)
+
+# Variance Stabilizing Transformation (VST)
+vst_dds = vst(dds, blind=TRUE)
+
+# Compare effect on the variance
+var_raw = meanSdPlot(counts(dds), plot = FALSE)$gg + ggtitle("Raw Counts")
+var_raw
+
+var_ntd = meanSdPlot(assay(ntd_dds), plot = FALSE)$gg + ggtitle("log2(n+1)")
+var_ntd
+
+var_vst = meanSdPlot(assay(vst_dds), plot = FALSE)$gg + ggtitle("VST")
+var_vst
+
+# Final improvement in distribution check
+boxplot(counts(dds), outline=T, 
+        main ="Raw Data", xaxt="n",
+        xlab = paste0("Samples, n=", nrow(metadata)),
+        ylab = "Raw Counts",
+        col  = ifelse(metadata$Condition == "hc", "skyblue", "salmon"),
+        ylim = c(min(counts(dds))-1, max(counts(dds))+3))
+legend(x = "topright", legend = c("Control", "Target"), 
+       fill = c("skyblue", "salmon"), bty = "n", cex = 0.8)
+
+
+boxplot(assay(vst_dds), outline=T, 
+        main ="VST", xaxt="n",
+        xlab = paste0("Samples, n=", nrow(metadata)),
+        ylab = "Transformed Counts",
+        col  = ifelse(metadata$Condition == "hc", "skyblue", "salmon"),
+        ylim = c(min(assay(vst_dds))-1, max(assay(vst_dds))+3))
+legend(x = "topright", legend = c("Control", "Target"), 
+       fill = c("skyblue", "salmon"), bty = "n", cex = 0.8)
+```
+
+### Principal Components Analysis (PCA)
+
+PCA is a dimensionality reduction technique used to simplify high-dimensional data into a few principal components that capture the main variation in the dataset, allowing us to visualize 2D plots instead of exploring thousands of genes.
+
+It is a critical QC step for:
+
+-   Validation of biological groups. If biological replicates do not actually cluster together, differential expression analysis is unlikely to find reliable results.
+
+-   Outlier detection. Identifying samples that look completely different from their group allows us to investigate potential technical errors or exclude them before adding artificial noise.
+
+-   Check for batch effects. Plotting the covariates available in the metadata, we can confirm if the samples are mainly grouping by just the biological condition or other sources of variation should be deeper taken into account.
+
+Basically, this technique will let us know whether our data are clean enough to proceed with the "basic" original DESeqDataSet design or additional considerations should be taken. For every analysis, all the available metadata are studied. As the number of genes included had different impact on every study, the standard selection of the top 500 most variable is implemented. Once the final design is decided, it is also deeper analyzed to look for potential outliers that are not visible in this first approach.
+
+```{r}
+# Condition
+plotPCA(vst_dds,
+        intgroup = c("Condition"),
+        ntop = 500,
+        pcsToUse = 1:2) + 
+  stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+  scale_color_manual(values = c("skyblue","salmon"))
+
+# Sex
+plotPCA(vst_dds,
+        intgroup = c("Sex"),
+        ntop = 500,
+        pcsToUse = 1:2) + 
+  stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+  scale_color_manual(values = c("skyblue","salmon"))
+
+# Instrument
+plotPCA(vst_dds,
+        intgroup = c("Instrument"),
+        ntop = 500,
+        pcsToUse = 1:2) + 
+  stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+  scale_color_manual(values = c("skyblue", "salmon"))
+
+# Deeper... Useless
+library(ggrepel)
+
+for (i in c(200,500,1000,2000,5000,10000)){
+  p = plotPCA(vst_dds,
+              intgroup = c("Instrument", "Condition", "Sex"),
+              ntop = i,
+              pcsToUse = 1:2) + 
+      geom_text_repel(aes(label = name), size = 3) +
+      stat_ellipse(aes(fill = group), geom = "polygon", alpha = 0) +
+      #scale_color_manual(values = c("skyblue","palegreen3","plum")) +
+      ggtitle(paste0("Top-",i))
+  print(p)
+}  
+```
+
+### Sample clustering
+
+While PCA provides crucial information about 2D clustering by summarizing a large portion of the variance, sample-to-sample heatmaps offer higher-resolution evidence.
+
+This matrix-based approach is also a vital QC step:
+
+-   Quantitative confirmation of PCA clusters. We can see the exact intensity of similarity between every sample pair. The appearance of distinct color blocks confirms that PCA clustering is robust and not an artifact of 2D projection.
+
+-   Identifying hidden outliers. Samples that may look acceptable in the PCA could be seen as a different color line in the heatmap, depicting that they are mathematically distant from the rest of the cohort.
+
+-   Biological sanity check. Controls should be similar to each other and no sample should have a low correlation with the others.
+
+-   Validating the transformation. These heatmaps serve as a final confirmation as, while differences must remain noticeable, there must not be a drastic correlation change across sample groups (the core of gene expression and background noise are always similar).
+
+We will perform both distance and correlation comparisons in order to validate our data from two perspectives that must be concordant. The first one is accompanied by hierarchical clustering (based on that distance measure) to objectively define sample relationships. If any outlier is visible, we will check if it consistent with the PCA findings.
+
+```{r}
+library(pheatmap)
+library(RColorBrewer)
+
+# Define groups and colors
+df_anno = as.data.frame(metadata[, c("Condition", "Instrument", "Sex")])
+
+ann_colors = list(
+  Condition  = c(hc = "skyblue", sle = "salmon"),
+  Instrument = c("NextSeq 500" = "palegreen3", "Illumina NovaSeq 6000" = "plum"),
+  Sex        = c(male = "gold", female = "pink")
+  
+)
+
+# Distance-based heatmap
+dist_matrix = as.matrix(dist(t(assay(vst_dds))))
+
+pheatmap(dist_matrix,
+         col = colorRampPalette(rev(brewer.pal(9, "Reds")))(255),
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(dist_matrix),
+         clustering_distance_cols = as.dist(dist_matrix),
+         treeheight_col = 0,
+         annotation_row = df_anno, annotation_col = df_anno,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Distance (VST)",
+         border_color = NA)
+
+# Correlation-based heatmap
+cor_matrix = cor(assay(vst_dds), method = "pearson")
+
+# Create fixed color fade to compare after QC
+n_breaks = 255
+breaks_fixed = seq(min(cor_matrix), max(cor_matrix), length.out = n_breaks+1)
+colors_fixed = colorRampPalette(brewer.pal(9, "Reds"))(n_breaks)
+
+pheatmap(cor_matrix,
+         breaks = breaks_fixed,
+         col = colors_fixed,
+         clustering_method = "ward.D2",
+         clustering_distance_rows = as.dist(1 - cor_matrix),
+         clustering_distance_cols = as.dist(1 - cor_matrix),
+         treeheight_col = 0,
+         annotation_row = df_anno, annotation_col = df_anno,
+         annotation_colors = ann_colors,
+         show_colnames = FALSE, show_rownames = FALSE,
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         main = "Sample-to-Sample Correlation (VST)",
+         border_color = NA)
+
+# Find the correlation outlier(s)
+mean_cor = colMeans(cor_matrix)
+sort(mean_cor)[1:10]
+```
+
+#### TOTALLY CONFOUNDED - NOT FIXABLE
